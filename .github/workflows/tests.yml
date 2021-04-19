@@ -88,7 +88,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        python-version: [2.7, pypy-2.7-7.3.3, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
         # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
         # mysql 8.0
         os: [ubuntu-18.04, macos-latest]
