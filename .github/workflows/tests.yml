@@ -88,13 +88,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        python-version: [2.7, pypy-2.7-7.3.3, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
         # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
         # mysql 8.0
         os: [ubuntu-18.04, macos-latest]
         exclude:
           - os: macos-latest
-            python-version: pypy-2.7
+            python-version: pypy-2.7-7.3.3
           - os: macos-latest
             python-version: pypy-3.6
           - os: macos-latest
@@ -183,13 +183,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        python-version: [2.7, pypy-2.7-7.3.3, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
         # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
         # mysql 8.0
         os: [ubuntu-18.04, macos-latest]
         exclude:
           - os: macos-latest
-            python-version: pypy-2.7
+            python-version: pypy-2.7-7.3.3
           - os: macos-latest
             python-version: pypy-3.6
           - os: macos-latest
@@ -300,7 +300,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: [2.7, 3.9, pypy-2.7, pypy-3.6]
+        python-version: [2.7, 3.9, pypy-2.7-7.3.3, pypy-3.6]
         os: [ubuntu-18.04]
     services:
       # Label used to access the service container
@@ -417,6 +417,8 @@ jobs:
           key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
           restore-keys: |
             ${{ runner.os }}-pip3-
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
 
       - name: Download RelStorage wheel
         uses: actions/download-artifact@v2

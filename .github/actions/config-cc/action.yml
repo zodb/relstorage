@@ -9,8 +9,8 @@ runs:
         if [ "`uname`" = "Darwin" ]; then
           brew update
           brew install ccache
-          echo CFLAGS=$CFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
-          echo CXXFLAGS=$CXXFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
+          echo CFLAGS=$CFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand -stdlib=libc++ >> $GITHUB_ENV
+          echo CXXFLAGS=$CXXFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand -stdlib=libc++ >> $GITHUB_ENV
           echo CC=ccache /usr/bin/clang >> $GITHUB_ENV
           echo CXX=ccache /usr/bin/clang++ >> $GITHUB_ENV
           echo LDCXXSHARED=ccache /usr/bin/clang -bundle -undefined dynamic_lookup >> $GITHUB_ENV
