@@ -288,11 +288,7 @@ class TestLocking(TestCase):
             if RUNNING_ON_CI:
                 # Give some extra time on CI since the resources are shared
                 # and often extremely limited.
-                multiplier = 1.7
-                if 'mysql' in type(self).__name__:
-                    # On Travis CI, we observe MySQL 8.0.21 to be very slow at this
-                    # for some reason.
-                    multiplier = 2.1
+                multiplier = 2.1
             self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
         else:
             # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
