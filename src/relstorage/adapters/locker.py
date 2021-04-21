@@ -24,7 +24,7 @@ import six
 
 
 from relstorage._compat import ABC
-from relstorage._compat import metricmethod
+from relstorage._util import metricmethod
 from relstorage._util import consume
 from relstorage._util import Lazy
 

@@ -26,7 +26,7 @@ from ZODB.utils import z64 as NO_PREV_TID
 
 
 from relstorage._compat import base64_decodebytes
-from relstorage._compat import metricmethod_sampled
+from relstorage._util import metricmethod_sampled
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import to_utf8
 

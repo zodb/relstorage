@@ -24,7 +24,7 @@ from ZODB.POSException import UndoError
 from ZODB.utils import u64
 from zope.interface import implementer
 
-from .._compat import metricmethod
+from .._util import metricmethod
 from .._compat import perf_counter
 from .._compat import OidList
 from .._util import byte_display

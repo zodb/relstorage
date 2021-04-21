@@ -52,7 +52,7 @@ from ..adapters.connections import ClosedConnection
 from ..adapters.connections import ClosedConnectionPool
 from ..adapters.connections import SingleConnectionPool
 from .._compat import clear_frames
-from .._compat import metricmethod
+from .._util import metricmethod
 from .._util import int64_to_8bytes
 from .._util import bytes8_to_int64
 from .._compat import OID_SET_TYPE

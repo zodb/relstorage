@@ -56,7 +56,7 @@ import json
 from zope.interface import implementer
 
 from relstorage._compat import iteritems
-from relstorage._compat import metricmethod_sampled
+from relstorage._util import metricmethod_sampled
 from relstorage._util import TRACE
 
 from ..adapter import AbstractAdapter

@@ -23,12 +23,16 @@ class MockConnection(object):
     in_critical_phase = False
     exited_critical_phase = False
     entered_critical_phase = False
+    cursor = None
 
     def exit_critical_phase(self):
         self.exited_critical_phase = True
 
     def enter_critical_phase_until_transaction_end(self):
         self.entered_critical_phase = True
+
+    def rollback_quietly(self):
+        """Does nothing"""
 
 class MockStoreConnectionPool(object):
 
@@ -38,9 +42,15 @@ class MockStoreConnectionPool(object):
     def borrow(self):
         return self.conn
 
+    def replace(self, conn):
+        assert conn is self.conn
+
 class MockTxnControl(object):
     def commit_phase1(self, _store_conn, _tid_int):
         """Does nothing."""
+
+    def commit_phase2(self, _store_conn, _txn, _load_conn):
+        """Does nothing"""
 
 class MockAdapter(_MockAdapter):
     DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = True
@@ -52,12 +62,17 @@ class MockAdapter(_MockAdapter):
         return 12345678, None
 
 
+class MockCache(object):
+    def after_tpc_finish(self, *_args):
+        """does nothing"""
+
 class MockStorage(object):
 
     def __init__(self):
         self._store_connection_pool = MockStoreConnectionPool()
         self._adapter = MockAdapter()
         self._load_connection = MockConnection()
+        self._cache = MockCache()
 
 class MockBeginState(object):
 
@@ -81,6 +96,23 @@ class MockLockedBeginState(MockBeginState):
 class _InterfaceMixin(object):
 
     BeginState = MockBeginState
+
+    def setUp(self):
+        from perfmetrics import set_statsd_client
+        from perfmetrics import statsd_client
+        from perfmetrics.testing import FakeStatsDClient
+        from .. import vote
+        self.stat_client = FakeStatsDClient()
+        self.__orig_client = statsd_client()
+        self.__orig_sample_rate = vote.METRIC_SAMPLE_RATE
+        vote.METRIC_SAMPLE_RATE = 1
+        set_statsd_client(self.stat_client)
+
+    def tearDown(self):
+        from perfmetrics import set_statsd_client
+        from .. import vote
+        set_statsd_client(self.__orig_client)
+        vote.METRIC_SAMPLE_RATE = self.__orig_sample_rate
 
     def _getClass(self):
         raise NotImplementedError
@@ -130,14 +162,36 @@ class _InterfaceMixin(object):
         self.assertFalse(vote.shared_state.load_connection.exited_critical_phase)
         self.assertFalse(vote.shared_state.store_connection.exited_critical_phase)
 
+class _TPCFinishMixin(object):
 
-class TestHistoryFree(_InterfaceMixin, unittest.TestCase):
+    def test_tpc_finish_stats(self):
+        from perfmetrics.testing.matchers import is_timer
+        from hamcrest import contains_exactly
+        vote = self._makeOne()
+        vote.shared_state.transaction = self
+        class InitialState(object):
+            def with_committed_tid_int(self, *args):
+                """Does nothing"""
+        vote.shared_state.initial_state = InitialState()
+        vote.lock_and_vote_times[0] = 1
+        vote.lock_and_vote_times[1] = 1
+
+        vote.tpc_finish(vote.shared_state._storage, vote.transaction)
+
+        assert_that(self.stat_client,
+                    contains_exactly(
+                        is_timer('relstorage.storage.tpc_vote.objects_locked'),
+                        is_timer('relstorage.storage.tpc_vote.between_vote_and_finish')
+                    ))
+
+
+class TestHistoryFree(_TPCFinishMixin, _InterfaceMixin, unittest.TestCase):
 
     def _getClass(self):
         from ..vote import HistoryFree
         return HistoryFree
 
-class TestHistoryPreserving(_InterfaceMixin, unittest.TestCase):
+class TestHistoryPreserving(_TPCFinishMixin, _InterfaceMixin, unittest.TestCase):
 
     BeginState = MockLockedBeginState
 

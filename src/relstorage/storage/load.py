@@ -27,8 +27,8 @@ from ZODB.utils import maxtid
 
 from relstorage.interfaces import POSKeyError
 from relstorage.cache.interfaces import CacheConsistencyError
-from .._compat import metricmethod
-from .._compat import metricmethod_sampled
+from .._util import metricmethod
+from .._util import metricmethod_sampled
 from .util import storage_method
 from .util import stale_aware
 
