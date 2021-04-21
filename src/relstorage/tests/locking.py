@@ -206,7 +206,7 @@ class TestLocking(TestCase):
         )
         multiplier = 3
         if RUNNING_ON_CI:
-            multiplier = 3.7
+            multiplier = 4.2
         self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
 
     @WithAndWithoutInterleaving
