@@ -160,10 +160,13 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             # Don't bother if we're empty.
             self.shared_state.adapter.mover.store_temps(cursor, self.shared_state.temp_storage)
 
-    def __enter_critical_phase_until_transaction_end(self):
+    def _enter_critical_phase_until_transaction_end(self):
         self.shared_state.load_connection.enter_critical_phase_until_transaction_end()
         self.shared_state.store_connection.enter_critical_phase_until_transaction_end()
 
+    def __exit_critical_phase(self):
+        self.shared_state.load_connection.exit_critical_phase()
+        self.shared_state.store_connection.exit_critical_phase()
 
     def _vote(self, storage):
         """
@@ -340,7 +343,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 old_states_to_prefetch.append((oid_int, tid_this_txn_saw_int))
             else:
                 # A readCurrent entry. Did it conflict?
-                # Note that some database adapters (MySQL) may have already raised a
+                # Note that some database adapters (MySQL, PostgreSQL) may have already raised a
                 # UnableToLockRowsToReadCurrentError indicating a conflict. That's a type
                 # of ReadConflictError like this.
                 expect_tid_int = required_tids[oid_int]
@@ -357,7 +360,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
 
         # We're probably going to need to make a database query. Elevate our
         # priority and regain control ASAP.
-        self.__enter_critical_phase_until_transaction_end()
+        self._enter_critical_phase_until_transaction_end()
 
         old_states_and_tids = self.shared_state.cache.prefetch_for_conflicts(
             self.shared_state.load_connection.cursor,
@@ -426,9 +429,10 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # a shared blob dir.
         #
         # Returns True if we also committed to the database.
-        if self.shared_state.prepared_txn:
+        state = self.shared_state
+        if state.prepared_txn:
             # Already done; *should* have been vote_only.
-            assert self.committing_tid_lock, (self.shared_state.prepared_txn,
+            assert self.committing_tid_lock, (state.prepared_txn,
                                               self.committing_tid_lock)
             return False
 
@@ -440,30 +444,35 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         if vote_only:
             # Must be voting.
             kwargs['commit'] = False
-            if self.shared_state.has_blobs():
+            if state.has_blobs():
                 # Avoid accessing the blobhelper unless we need it
-                blob_meth = self.shared_state.blobhelper.vote
+                blob_meth = state.blobhelper.vote
                 kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
 
-        if vote_only \
-           or self.shared_state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
+        interleavable = state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE
+        if vote_only or interleavable:
             # If we're going to have to make two trips to the database, one to lock it and get a
             # tid and then one to commit and release locks, either because we're
             # just voting right now, not committing, or because the database doesn't
             # support doing that in a single operation, we need to go critical and
             # regain control ASAP so we can complete the operation.
-            self.__enter_critical_phase_until_transaction_end()
+            self._enter_critical_phase_until_transaction_end()
+        else:
+            # We're committing, and we can do so in a single trip to the database.
+            # If we took the critical phase earlier to resolve conflicts, we don't need
+            # it anymore
+            self.__exit_critical_phase()
 
         # Note that this may commit the load_connection and make it not
         # viable for a historical view anymore.
-        committing_tid_int, prepared_txn = self.shared_state.adapter.lock_database_and_move(
-            self.shared_state.store_connection, self.shared_state.load_connection,
-            self.shared_state.has_blobs(),
+        committing_tid_int, prepared_txn = state.adapter.lock_database_and_move(
+            state.store_connection, state.load_connection,
+            state.has_blobs(),
             self.ude,
             **kwargs
         )
 
-        self.shared_state.prepared_txn = prepared_txn
+        state.prepared_txn = prepared_txn
         committing_tid_lock = self.committing_tid_lock
         assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int, (
             committing_tid_int, committing_tid_lock)
@@ -588,6 +597,7 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     def _lock_and_move(self, vote_only=False):
         # We don't do the final commit,
         # we just prepare.
+        self._enter_critical_phase_until_transaction_end()
         self.shared_state.prepared_txn = self.shared_state.adapter.txncontrol.commit_phase1(
             self.shared_state.store_connection,
             self.committing_tid_lock.tid_int
