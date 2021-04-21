@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.2 (unreleased)
+3.4.2 (2021-04-21)
 ==================
 
 - Fix write replica selection after a disconnect, and generally
