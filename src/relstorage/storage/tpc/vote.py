@@ -35,6 +35,8 @@ from relstorage._util import log_timed
 from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from relstorage._util import TRACE
+from relstorage._util import METRIC_SAMPLE_RATE
+from relstorage.adapters.interfaces import UnableToAcquireLockError
 from ..interfaces import VoteReadConflictError
 from ..interfaces import ITPCStateVoting
 
@@ -226,7 +228,16 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # Lock objects being modified and those registered with
         # readCurrent(). This could raise ReadConflictError or locking
         # errors. See ``IRelStorageAdapter`` for details.
-        conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
+        try:
+            conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
+        except UnableToAcquireLockError:
+            self.shared_state.stat_count(
+                'relstorage.storage.tpc_vote.unable_to_acquire_lock',
+                1, # value
+                1  # rate. Always store these.
+            )
+            raise
+
         self.lock_and_vote_times[0] = time.time()
         # Ok, we have now taken database locks: exclusive for each old
         # object we are updating and shared for each we wanted to
@@ -297,6 +308,11 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             return invalidated_oid_ints
 
         self.count_conflicts = count_conflicts = len(conflicts)
+        self.shared_state.stat_count(
+            'relstorage.storage.tpc_vote.total_conflicts',
+            count_conflicts,
+            METRIC_SAMPLE_RATE
+        )
 
         # In the past, we didn't load all conflicts from the DB at
         # once, just one at a time. This was because we also fetched
@@ -348,6 +364,11 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 # of ReadConflictError like this.
                 expect_tid_int = required_tids[oid_int]
                 if committed_tid_int != expect_tid_int:
+                    self.shared_state.stat_count(
+                        'relstorage.storage.tpc_vote.readCurrent_conflicts',
+                        1,
+                        METRIC_SAMPLE_RATE
+                    )
                     raise VoteReadConflictError(
                         oid=int64_to_8bytes(oid_int),
                         serials=(int64_to_8bytes(committed_tid_int),
@@ -358,6 +379,11 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             # we have no other opportunities to switch.
             return invalidated_oid_ints
 
+        self.shared_state.stat_count(
+            'relstorage.storage.tpc_vote.committed_conflicts',
+            len(actual_conflicts),
+            METRIC_SAMPLE_RATE
+        )
         # We're probably going to need to make a database query. Elevate our
         # priority and regain control ASAP.
         self._enter_critical_phase_until_transaction_end()
@@ -378,34 +404,40 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # The conflicts can be very large binary strings, no need to include
         # them in traceback info. (Plus they could be sensitive.)
         __traceback_info__ = count_conflicts, invalidated_oid_ints
+        try:
+            for conflict in actual_conflicts:
+                # Match the names of the arguments used
+                oid_int, committed_tid_int, tid_this_txn_saw_int, committedData = conflict
 
-        for conflict in actual_conflicts:
-            # Match the names of the arguments used
-            oid_int, committed_tid_int, tid_this_txn_saw_int, committedData = conflict
+                oid = int64_to_8bytes(oid_int)
+                committedSerial = int64_to_8bytes(committed_tid_int)
+                oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
+                newpickle = read_temp(oid_int)
 
-            oid = int64_to_8bytes(oid_int)
-            committedSerial = int64_to_8bytes(committed_tid_int)
-            oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
-            newpickle = read_temp(oid_int)
+                # Because we're using the _CachedConflictResolver, we can only loadSerial()
+                # one state: the ``oldSerial`` state. Therefore the committedData *must* be
+                # given.
 
-            # Because we're using the _CachedConflictResolver, we can only loadSerial()
-            # one state: the ``oldSerial`` state. Therefore the committedData *must* be
-            # given.
+                resolved_state = tryToResolveConflict(oid, committedSerial, oldSerial,
+                                                      newpickle, committedData)
 
-            resolved_state = tryToResolveConflict(oid, committedSerial, oldSerial,
-                                                  newpickle, committedData)
+                if resolved_state is None:
+                    # unresolvable; kill the whole transaction
+                    raise ConflictError(
+                        oid=oid,
+                        serials=(oldSerial, committedSerial),
+                        data=newpickle,
+                    )
 
-            if resolved_state is None:
-                # unresolvable; kill the whole transaction
-                raise ConflictError(
-                    oid=oid,
-                    serials=(oldSerial, committedSerial),
-                    data=newpickle,
-                )
-
-            # resolved
-            invalidated_oid_ints.add(oid_int)
-            store_temp(oid_int, resolved_state, committed_tid_int)
+                # resolved
+                invalidated_oid_ints.add(oid_int)
+                store_temp(oid_int, resolved_state, committed_tid_int)
+        finally:
+            self.shared_state.stat_count(
+                'relstorage.storage.tpc_vote.resolved_conflicts',
+                len(invalidated_oid_ints),
+                METRIC_SAMPLE_RATE
+            )
 
         # We resolved some conflicts, so we need to send them over to the database.
         adapter.mover.replace_temps(
@@ -552,6 +584,16 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 self, None,
                 between_vote_and_finish,
                 perf_logger
+            )
+            self.shared_state.stat_timing(
+                'relstorage.storage.tpc_vote.objects_locked',
+                locked_duration,
+                METRIC_SAMPLE_RATE
+            )
+            self.shared_state.stat_timing(
+                'relstorage.storage.tpc_vote.between_vote_and_finish',
+                between_vote_and_finish,
+                METRIC_SAMPLE_RATE
             )
 
             return next_phase

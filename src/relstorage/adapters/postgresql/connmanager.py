@@ -17,7 +17,7 @@ from __future__ import print_function
 
 import logging
 
-from ..._compat import metricmethod
+from ..._util import metricmethod
 from ..connmanager import AbstractConnectionManager
 
 logger = logging.getLogger(__name__)

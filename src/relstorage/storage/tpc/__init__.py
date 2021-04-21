@@ -31,6 +31,8 @@ from transaction.interfaces import NoTransaction
 from transaction._transaction import rm_key
 from transaction import get as get_thread_local_transaction
 
+from perfmetrics import statsd_client
+
 from zope.interface import implementer
 
 from ZODB.POSException import ReadOnlyError
@@ -200,6 +202,27 @@ class SharedTPCState(object):
 
     def has_temp_data(self):
         return 'temp_storage' in self.__dict__ and self.temp_storage
+
+    @_LazyResource
+    def _statsd_buf(self):
+        return []
+
+    @_statsd_buf.aborter
+    @_statsd_buf.releaser
+    def _statds_buf(self, _storage, buf, _force=None):
+        client = statsd_client()
+        if client is not None:
+            client.sendbuf(buf)
+
+    def stat_timing(self, stat, value, rate=1):
+        client = statsd_client()
+        if client is not None:
+            client.timing(stat, value, rate, self._statsd_buf)
+
+    def stat_count(self, stat, value, rate=1):
+        client = statsd_client()
+        if client is not None:
+            client.incr(stat, value, rate, self._statsd_buf)
 
     def __cleanup(self, method_name, method_args):
         storage = self._storage
@@ -391,7 +414,7 @@ class NotInTransaction(object):
 
     restore = deleteObject = undo = restoreBlob = store
 
-    def tpc_begin(self,  storage, transaction): # XXX: Signature needs to change.
+    def tpc_begin(self, storage, transaction): # XXX: Signature needs to change.
         if self.read_only:
             raise ReadOnlyError()
         if transaction is self.transaction: # Also handles None.

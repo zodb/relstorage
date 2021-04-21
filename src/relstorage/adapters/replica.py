@@ -18,7 +18,7 @@ import time
 
 from zope.interface import implementer
 
-from .._compat import metricmethod
+from .._util import metricmethod
 from .interfaces import IReplicaSelector
 
 

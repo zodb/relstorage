@@ -13,6 +13,19 @@
 
 - Add support for mysql-connector-python-8.0.24.
 
+- Add StatsD counter metrics
+  "relstorage.storage.tpc_vote.unable_to_acquire_lock",
+  "relstorage.storage.tpc_vote.total_conflicts,"
+  "relstorage.storage.tpc_vote.readCurrent_conflicts,"
+  "relstorage.storage.tpc_vote.committed_conflicts," and
+  "relstorage.storage.tpc_vote.resolved_conflicts". Also add StatsD
+  timer metrics "relstorage.storage.tpc_vote.objects_locked" and
+  "relstorage.storage.tpc_vote.between_vote_and_finish" corresponding
+  to existing log messages. The rate at which these are sampled, as
+  well as the rate at which many method timings are sampled, defaults
+  to 10% (0.1) and can be controlled with the
+  ``RS_PERF_STATSD_SAMPLE_RATE`` environment variable. See :issue:`453`.
+
 3.4.1 (2021-04-12)
 ==================
 

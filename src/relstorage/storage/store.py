@@ -22,8 +22,8 @@ from __future__ import division
 from __future__ import print_function
 
 
-from .._compat import metricmethod
-from .._compat import metricmethod_sampled
+from .._util import metricmethod
+from .._util import metricmethod_sampled
 from .util import writable_storage_method
 from .util import phase_dependent_aborts_early
 

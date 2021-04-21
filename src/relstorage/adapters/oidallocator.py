@@ -20,7 +20,7 @@ from __future__ import absolute_import
 import abc
 from contextlib import contextmanager
 
-from relstorage._compat import metricmethod
+from relstorage._util import metricmethod
 from relstorage._compat import ABC
 
 from .schema import Schema

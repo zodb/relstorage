@@ -62,8 +62,6 @@ __all__ = [
     'iteroiditems',
     'string_types',
     'NStringIO',
-    'metricmethod',
-    'metricmethod_sampled',
     'wraps',
     'ABC',
     'base64_encodebytes',
@@ -314,8 +312,6 @@ def iteroiditems(d):
     return d.iteritems() if hasattr(d, 'iteritems') else d.items()
 
 # Types
-from perfmetrics import metricmethod # pylint:disable=wrong-import-position
-from perfmetrics import Metric # pylint:disable=wrong-import-position
 
 if PY3:
     string_types = (str,)
@@ -339,7 +335,6 @@ else:
             replacement.__wrapped__ = self._orig
             return replacement
 
-metricmethod_sampled = Metric(method=True, rate=0.1)
 
 IN_TESTRUNNER = (
     # zope-testrunner --test-path ...
@@ -348,13 +343,6 @@ IN_TESTRUNNER = (
     or os.path.join('zope', 'testrunner') in sys.argv[0]
 )
 
-
-if IN_TESTRUNNER and os.environ.get('RS_TEST_DISABLE_METRICS'):
-    # If we're running under the testrunner,
-    # don't apply the metricmethod stuff. It makes
-    # backtraces ugly and makes stepping in the
-    # debugger annoying.
-    metricmethod = metricmethod_sampled = lambda f: f
 
 try:
     from abc import ABC

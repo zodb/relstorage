@@ -22,8 +22,8 @@ from hashlib import md5
 from zope.interface import implementer
 
 from .._compat import OID_TID_MAP_TYPE
-from .._compat import metricmethod_sampled
-from .._compat import metricmethod
+from .._util import metricmethod_sampled
+from .._util import metricmethod
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
 from ._util import DatabaseHelpersMixin

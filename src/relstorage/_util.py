@@ -43,9 +43,13 @@ from ZODB.utils import u64
 # It is "extremely verbose"
 from ZODB.loglevels import TRACE
 
+from perfmetrics import metricmethod
+from perfmetrics import Metric
+
 from relstorage._compat import wraps
 from relstorage._compat import update_wrapper
 from relstorage._compat import perf_counter
+from relstorage._compat import IN_TESTRUNNER
 
 logger = logging.getLogger(__name__)
 perf_logger = logger.getChild('timing')
@@ -73,9 +77,12 @@ __all__ = [
     'parse_byte_size',
     'positive_integer',
     'get_duration_from_environ',
+    'metricmethod',
+    'metricmethod_sampled',
 ]
 
 positive_integer = RangeCheckedConversion(integer, min=1)
+non_negative_float = RangeCheckedConversion(float, min=0)
 
 def _setting_from_environ(converter, environ_name, default):
     result = default
@@ -95,6 +102,9 @@ def _setting_from_environ(converter, environ_name, default):
 
 def get_positive_integer_from_environ(environ_name, default):
     return _setting_from_environ(positive_integer, environ_name, default)
+
+def get_non_negative_float_from_environ(environ_name, default):
+    return _setting_from_environ(non_negative_float, environ_name, default)
 
 def parse_boolean(val):
     if val == '0':
@@ -300,6 +310,18 @@ def log_timed_only_self(func):
     return log_timed(func)
 
 _ThreadWithReady = None
+
+METRIC_SAMPLE_RATE = get_non_negative_float_from_environ('RS_PERF_STATSD_SAMPLE_RATE', 0.1)
+
+metricmethod_sampled = Metric(method=True, rate=METRIC_SAMPLE_RATE)
+
+if IN_TESTRUNNER and os.environ.get('RS_TEST_DISABLE_METRICS'):
+    # If we're running under the testrunner,
+    # don't apply the metricmethod stuff. It makes
+    # backtraces ugly and makes stepping in the
+    # debugger annoying.
+    metricmethod = metricmethod_sampled = lambda f: f
+
 
 def thread_spawn(func, args=(), daemon=False):
     global _ThreadWithReady

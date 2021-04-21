@@ -29,7 +29,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage.storage.interfaces import VoteReadConflictError
-from .._compat import metricmethod_sampled
+from .._util import metricmethod_sampled
 from .._compat import MAX_S_TID
 from .._util import timestamp_at_unixtime
 from .._util import TRACE
