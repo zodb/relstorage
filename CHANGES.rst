@@ -8,6 +8,8 @@
 - Fix write replica selection after a disconnect, and generally
   further improve handling of unexpectedly closed store connections.
 
+- Release the critical section a bit sooner at commit time, when
+  possible. Only affects gevent-based drivers. See :issue:`454`.
 
 3.4.1 (2021-04-12)
 ==================
