@@ -152,10 +152,14 @@ class DatabaseHelpersMixin(object):
         # can return column names and the like as bytes when we want native str.
         # pg8000 on Python2 does the reverse and returns unicode when we want
         # native str.
+        # Sometime between version 8.0.21 and 8.0.24, mysql-connector-python
+        # started returning `bytearray`
         if value is not None and not isinstance(value, str):
             # Checking for bytes tells us that it's a unicode object on Python 2;
             # we won't get here if it's bytes (because bytes is str)
-            value = value.decode('ascii') if isinstance(value, bytes) else value.encode('ascii"')
+            value = (value.decode('ascii')
+                     if isinstance(value, (bytes, bytearray))
+                     else value.encode('ascii"'))
         return value
 
     def _column_descriptions(self, cursor):

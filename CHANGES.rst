@@ -11,6 +11,8 @@
 - Release the critical section a bit sooner at commit time, when
   possible. Only affects gevent-based drivers. See :issue:`454`.
 
+- Add support for mysql-connector-python-8.0.24.
+
 3.4.1 (2021-04-12)
 ==================
 
