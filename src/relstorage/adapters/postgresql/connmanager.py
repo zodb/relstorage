@@ -19,6 +19,7 @@ import logging
 
 from ..._util import metricmethod
 from ..connmanager import AbstractConnectionManager
+from .util import backend_pid_for_connection
 
 logger = logging.getLogger(__name__)
 
@@ -134,3 +135,6 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
             replica_selector=self.ro_replica_selector,
             application_name='RS: Load'
         )
+
+    def describe_connection(self, conn, cursor):
+        return {'backend_pid': backend_pid_for_connection(conn, cursor)}

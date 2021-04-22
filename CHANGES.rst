@@ -5,7 +5,8 @@
 3.4.3 (unreleased)
 ==================
 
-- Nothing changed yet.
+- PostgreSQL: Log the backend PID at the start of TPC. This can help
+  correlate error messages from the server. See :issue:`460`.
 
 
 3.4.2 (2021-04-21)

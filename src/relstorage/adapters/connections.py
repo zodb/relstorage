@@ -49,6 +49,7 @@ class AbstractManagedConnection(object):
         self.connection = None
         self.connmanager = connmanager
         self._cursor = None
+        self._connection_description = None
         self.active = False
         self._new_connection = getattr(connmanager, self._NEW_CONNECTION_NAME)
         self._restart = getattr(connmanager, self._RESTART_NAME)
@@ -156,6 +157,7 @@ class AbstractManagedConnection(object):
         """
         new_conn, new_cursor = self._new_connection()
         self.connection, self._cursor = new_conn, new_cursor
+        self._connection_description = self.connmanager.describe_connection(new_conn, new_cursor)
         self.on_opened(new_conn, new_cursor)
 
     @staticmethod
@@ -279,10 +281,11 @@ class AbstractManagedConnection(object):
             self.connmanager.close(cursor=ss_cursor)
 
     def __repr__(self):
-        return "<%s at 0x%x active=%s, conn=%r cur=%r>" % (
+        return "<%s at 0x%x active=%s description=%s conn=%r cur=%r>" % (
             self.__class__.__name__,
             id(self),
             self.active,
+            self._connection_description,
             self.connection,
             self._cursor
         )

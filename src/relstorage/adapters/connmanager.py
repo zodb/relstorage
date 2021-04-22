@@ -397,3 +397,6 @@ class AbstractConnectionManager(object):
         self._after_opened_for_store(conn, cursor)
         self._call_hooks(self._on_store_opened, conn, cursor,
                          cursor, restart=True)
+
+    def describe_connection(self, conn, cursor): # pylint:disable=unused-argument
+        return "<unknown>"
