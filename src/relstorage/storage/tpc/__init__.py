@@ -45,7 +45,7 @@ from ..._util import Lazy as BaseLazy
 
 from .temporary_storage import TemporaryStorage
 
-log = logging.getLogger("relstorage")
+logger = logging.getLogger(__name__)
 
 _CLOSED_CONNECTION = ClosedConnection()
 
@@ -111,7 +111,11 @@ class SharedTPCState(object):
 
     @_LazyResource
     def store_connection(self):
-        return self._storage._store_connection_pool.borrow()
+        conn = self._storage._store_connection_pool.borrow()
+        # Report on the connection we will use.
+        # https://github.com/zodb/relstorage/issues/460
+        logger.info("Using store connection %s", conn)
+        return conn
 
     @store_connection.aborter
     def store_connection(self, storage, store_connection, force):

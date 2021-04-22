@@ -341,6 +341,9 @@ class MockConnectionManager(object):
     def open_and_call(self, func):
         return func(*self.open_for_load())
 
+    def describe_connection(self, _conn, _cursor):
+        return "<MockConnectionManager>"
+
 class MockPackUndo(object):
     pass
 

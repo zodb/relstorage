@@ -60,7 +60,7 @@ class PostgreSQLLocker(AbstractLocker):
             cursor.connection.rollback()
             return 'Transaction failed; no lock info available'
 
-        from . import debug_locks
+        from .util import debug_locks
         debug_locks(cursor)
         return self._rows_as_pretty_string(cursor)
 

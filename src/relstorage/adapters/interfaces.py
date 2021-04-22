@@ -529,6 +529,15 @@ class IConnectionManager(Interface):
         .. versionadded:: 2.1a1
         """
 
+    def describe_connection(conn, cursor):
+        """
+        Return an object that describes the connection.
+
+        The object should have a useful `str` value.
+
+        .. versionadded:: 3.4.3
+        """
+
 
 class IManagedDBConnection(Interface):
     """
