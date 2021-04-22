@@ -27,6 +27,7 @@ from tempfile import SpooledTemporaryFile
 from relstorage._compat import OID_OBJECT_MAP_TYPE as OidObjectMap
 from relstorage._compat import OidObjectMap_max_key
 from relstorage._compat import iteroiditems
+from relstorage._compat import NStringIO
 
 class TemporaryStorage(object):
     __slots__ = (
@@ -115,3 +116,48 @@ class TemporaryStorage(object):
             self._queue.close()
             self._queue = None
             self._queue_contents = () # Not None so len() keeps working
+
+    def __repr__(self):
+        return "<%s.%s at 0x%x len: %d>" % (
+            type(self).__module__,
+            type(self).__name__,
+            id(self),
+            len(self)
+        )
+
+    def __str__(self):
+        base = repr(self)
+        if not self:
+            return base
+
+        out = NStringIO()
+
+        div = '=' * len(base)
+        headings = ['OID', 'Length', 'Previous TID']
+        col_width = (len(base) - 5) // len(headings)
+
+        print(base, file=out)
+        print(div, file=out)
+        print('| ', file=out, end='')
+        for heading in headings:
+            print('%-*s' % (col_width, heading), end='', file=out)
+            print('| ', end='', file=out)
+        out.seek(out.tell() - 3)
+        print('|', file=out)
+        print(div, file=out)
+
+        items = sorted(
+            (oid_int, endpos - startpos, prev_tid_int)
+            for (startpos, endpos, oid_int, prev_tid_int)
+            in self.items()
+        )
+
+        for oid_int, length, prev_tid_int in items:
+            print('%*d  |%*d |%*d' % (
+                col_width, oid_int,
+                col_width, length,
+                col_width, prev_tid_int
+            ), file=out)
+
+
+        return out.getvalue()

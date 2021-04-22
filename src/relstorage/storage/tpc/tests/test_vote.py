@@ -209,3 +209,38 @@ class TestHistoryPreservingDeleteOnly(_InterfaceMixin, unittest.TestCase):
 
     def _check_lock_and_move_commit(self, committed):
         self.assertFalse(committed)
+
+class TestFunctions(unittest.TestCase):
+
+    def _makeSharedState(self, initial_state=None, storage=None, transaction=None):
+        return SharedTPCState(initial_state, storage, transaction)
+
+    def _callFUT(self, ex, state, required_tids):
+        from ..vote import add_details_to_lock_error
+        add_details_to_lock_error(ex, state, required_tids)
+        return ex
+
+    def _check(self, kind):
+        ex = kind('MESSAGE')
+        state = self._makeSharedState()
+        state.temp_storage.store_temp(1, b'abc', 42) # pylint:disable=no-member
+
+        self._callFUT(ex, state, {1: 1})
+        s = str(ex)
+        self.assertIn('readCurrent {oid: tid}', s)
+        self.assertIn('{1: 1}', s)
+        self.assertIn('Previous TID', s)
+        self.assertIn('42', s)
+        self.assertIn('MESSAGE', s)
+
+    def test_add_details_to_UnableToAcquireCommitLockError(self):
+        from relstorage.adapters.interfaces import UnableToAcquireCommitLockError
+        self._check(UnableToAcquireCommitLockError)
+
+    def test_add_details_to_UnableToLockRowsToModifyError(self):
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        self._check(UnableToLockRowsToModifyError)
+
+    def test_add_details_to_UnableToLockRowsToReadCurrentError(self):
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        self._check(UnableToLockRowsToReadCurrentError)
