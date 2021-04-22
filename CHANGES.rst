@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.3 (unreleased)
+3.4.3 (2021-04-22)
 ==================
 
 - PostgreSQL: Log the backend PID at the start of TPC. This can help
