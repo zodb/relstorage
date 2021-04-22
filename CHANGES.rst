@@ -11,6 +11,8 @@
 - Make more conflict errors include information about the OIDs and
   TIDs that may have been involved in the conflict.
 
+- Add support for pg8000 1.17 and newer; tested with 1.19.2. See
+  :issue:`438`.
 
 3.4.2 (2021-04-21)
 ==================

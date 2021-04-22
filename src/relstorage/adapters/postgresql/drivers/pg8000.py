@@ -92,10 +92,12 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                 def __init__(self, conn):
                     super(Cursor, self).__init__(conn)
                     # pylint:disable=access-member-before-definition
-                    assert isinstance(self._cached_rows, deque)
-                    # Make sure rows are tuples, not lists.
-                    # BTrees don't like lists.
-                    self._cached_rows = _tuple_deque()
+                    if hasattr(self, '_cached_rows'):
+                        # This went away in 1.17
+                        assert isinstance(self._cached_rows, deque)
+                        # Make sure rows are tuples, not lists.
+                        # BTrees don't like lists.
+                        self._cached_rows = _tuple_deque()
 
                 @property
                 def connection(self):
@@ -105,6 +107,15 @@ class PG8000Driver(AbstractPostgreSQLDriver):
 
                 def copy_expert(self, sql, stream):
                     return self.execute(sql, stream=stream)
+
+                def execute(self, *args, **kwargs):
+                    result = super(Cursor, self).execute(*args, **kwargs)
+                    if hasattr(self, '_row_iter'):
+                        # pylint:disable=attribute-defined-outside-init
+                        self._row_iter = iter([
+                            tuple(row) for row in self._row_iter
+                        ])
+                    return result
 
             class Connection(LobConnectionMixin,
                              self.driver_module.Connection):
@@ -151,6 +162,19 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                         # 1.16.0 dropped the ``max_prepared_statements`` argument.
                         del kwargs['max_prepared_statements']
                         super(Connection, self).__init__(**kwargs)
+                    if (
+                            hasattr(self, 'py_types')
+                            and list not in self.py_types
+                            and not hasattr(self, 'make_param')
+                    ):
+                        # We're trying to detect pg8000 1.17+ to
+                        # fix https://github.com/zodb/relstorage/issues/438#issuecomment-825116452:
+                        # pg8000 can guess a the parameter type wrong for arrays
+                        # (I only directly observed this issue on pg8000 1.19.2)
+                        # pylint:disable=no-name-in-module,import-error
+                        from pg8000.converters import BIGINT_ARRAY
+                        from pg8000.converters import int_array_out
+                        self.py_types[list] = (BIGINT_ARRAY, int_array_out)
 
                 def cursor(self):
                     return Cursor(self)
