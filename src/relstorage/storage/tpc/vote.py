@@ -230,12 +230,14 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # errors. See ``IRelStorageAdapter`` for details.
         try:
             conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
-        except UnableToAcquireLockError:
+        except UnableToAcquireLockError as ex:
             self.shared_state.stat_count(
                 'relstorage.storage.tpc_vote.unable_to_acquire_lock',
                 1, # value
                 1  # rate. Always store these.
             )
+            add_details_to_lock_error(ex, self.shared_state, self.required_tids)
+            del ex
             raise
 
         self.lock_and_vote_times[0] = time.time()
@@ -658,3 +660,19 @@ class _CachedConflictResolver(ConflictResolvingStorage):
         state, tid = self._old_states_and_tids[bytes8_to_int64(oid)]
         assert bytes8_to_int64(serial) == tid
         return state
+
+def add_details_to_lock_error(ex, shared_state, required_tids):
+    # type: (Exception, SharedState, required_tids)
+    message = '\n'.join((
+            'Stored Objects',
+            str(shared_state.temp_storage) if shared_state.has_temp_data() else 'None',
+            'readCurrent {oid: tid}',
+            str(dict(required_tids)) # May be a BTree, which has no
+        ))
+
+    if hasattr(ex, 'message'):
+        # A ConflictError subclass *or* we're on Python 2.
+        ex.message += '\n' + message
+
+    if isinstance(getattr(ex, 'args', None), tuple):
+        ex.args = ex.args + (message,)

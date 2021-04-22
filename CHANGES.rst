@@ -8,6 +8,9 @@
 - PostgreSQL: Log the backend PID at the start of TPC. This can help
   correlate error messages from the server. See :issue:`460`.
 
+- Make more conflict errors include information about the OIDs and
+  TIDs that may have been involved in the conflict.
+
 
 3.4.2 (2021-04-21)
 ==================
