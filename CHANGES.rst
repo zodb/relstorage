@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.5 (unreleased)
+3.4.5 (2021-04-23)
 ==================
 
 - Scale the new timing metrics introduced in 3.4.2 to milliseconds.
