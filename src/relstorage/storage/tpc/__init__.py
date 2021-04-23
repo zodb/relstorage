@@ -80,11 +80,17 @@ class _LazyResource(BaseLazy):
             inst._used_resources.append(self)
 
     def aborter(self, func):
+        assert not isinstance(func, _LazyResource)
         self.abort_function = func
         return self
 
     def releaser(self, func):
+        assert not isinstance(func, _LazyResource)
         self.release_function = func
+        return self
+
+    def cleaner(self, func):
+        self.abort_function = self.release_function = func
         return self
 
 
@@ -196,12 +202,8 @@ class SharedTPCState(object):
     def temp_storage(self):
         return TemporaryStorage()
 
-    @temp_storage.aborter
-    def temp_storage(self, _storage, temp_storage, _force):
-        temp_storage.close()
-
-    @temp_storage.releaser
-    def temp_storage(self, _storage, temp_storage):
+    @temp_storage.cleaner
+    def temp_storage(self, _storage, temp_storage, _force=None):
         temp_storage.close()
 
     def has_temp_data(self):
@@ -211,11 +213,10 @@ class SharedTPCState(object):
     def _statsd_buf(self):
         return []
 
-    @_statsd_buf.aborter
-    @_statsd_buf.releaser
+    @_statsd_buf.cleaner
     def _statds_buf(self, _storage, buf, _force=None):
         client = statsd_client()
-        if client is not None:
+        if client is not None and buf:
             client.sendbuf(buf)
 
     def stat_timing(self, stat, value, rate=1):
@@ -252,6 +253,7 @@ class SharedTPCState(object):
             setattr(self, resource.__name__, new_value)
 
         if exceptions: # pragma: no cover
+            # This usually indicates a bug in RelStorage that should be fixed.
             raise Exception("Failed to close one or more resources: %s" % (exceptions,))
 
     def abort(self, force=False):

@@ -5,7 +5,10 @@
 3.4.4 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Fix an exception sending stats when TPC is aborted because of an error
+  during voting such as a ``ConflictError``. This only affected those
+  deployments with perfmetrics configured to use a StatsD client. See
+  :issue:`464`.
 
 
 3.4.3 (2021-04-22)

@@ -128,6 +128,18 @@ class TestSharedTPCState(unittest.TestCase):
             self._load_connection = load_conn
             self.blobhelper = blobhelper
 
+    def setUp(self):
+        from perfmetrics import set_statsd_client
+        from perfmetrics import statsd_client
+        from perfmetrics.testing import FakeStatsDClient
+        self.stat_client = FakeStatsDClient()
+        self.__orig_client = statsd_client()
+        set_statsd_client(self.stat_client)
+
+    def tearDown(self):
+        from perfmetrics import set_statsd_client
+        set_statsd_client(self.__orig_client)
+
     def test_store_connection_borrow_release(self):
         from .. import _CLOSED_CONNECTION
         conn = object()
@@ -236,3 +248,65 @@ class TestSharedTPCState(unittest.TestCase):
         self.assertIsNone(ts._queue)
         self.assertIsNone(inst.temp_storage)
         self.assertFalse(inst.has_temp_data())
+
+    def test_statsd_buf_abort(self):
+        from perfmetrics.testing.matchers import is_timer
+        from perfmetrics.testing.matchers import is_counter
+        from hamcrest import contains_exactly
+
+        inst = self._makeOne()
+        self.assertEqual([], inst._statsd_buf)
+        self.assertIn('_statsd_buf', inst.__dict__)
+        inst.stat_count('count', 1)
+        inst.stat_timing('timer', 1)
+        inst.abort()
+        self.assertIsNone(inst._statsd_buf)
+        # Stats were sent
+        assert_that(
+            self.stat_client,
+            contains_exactly(
+                is_counter('count'),
+                is_timer('timer')
+            )
+        )
+        inst.release()
+        self.assertIsNone(inst._statsd_buf)
+        # but not sent again
+        assert_that(
+            self.stat_client,
+            contains_exactly(
+                is_counter('count'),
+                is_timer('timer')
+            )
+        )
+
+    def test_statsd_buf_release(self):
+        from perfmetrics.testing.matchers import is_timer
+        from perfmetrics.testing.matchers import is_counter
+        from hamcrest import contains_exactly
+
+        inst = self._makeOne()
+        self.assertEqual([], inst._statsd_buf)
+        self.assertIn('_statsd_buf', inst.__dict__)
+        inst.stat_count('count', 1)
+        inst.stat_timing('timer', 1)
+        inst.release()
+        self.assertIsNone(inst._statsd_buf)
+        # Stats were sent
+        assert_that(
+            self.stat_client,
+            contains_exactly(
+                is_counter('count'),
+                is_timer('timer')
+            )
+        )
+        inst.abort()
+        self.assertIsNone(inst._statsd_buf)
+        # But not sent again
+        assert_that(
+            self.stat_client,
+            contains_exactly(
+                is_counter('count'),
+                is_timer('timer')
+            )
+        )
