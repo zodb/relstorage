@@ -525,17 +525,17 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         return kwargs['commit']
 
     @log_timed
-    def tpc_finish(self, storage, transaction, f=None):
+    def tpc_finish(self, storage, transaction, f=None, _time=time.time):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_finish called with wrong transaction")
         try:
-            finish_entry = time.time()
+            finish_entry = _time()
             # Handle the finishing. We cannot/must not fail now.
             # TODO: Move most of this into the Finish class/module.
             did_commit = self._lock_and_move()
             if did_commit:
-                locks_released = time.time()
+                locks_released = _time()
             assert self.committing_tid_lock is not None, self
 
 
@@ -569,7 +569,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 f(self.committing_tid_lock.tid)
             next_phase = Finish(self, self.committing_tid_lock.tid_int, not did_commit)
             if not did_commit:
-                locks_released = time.time()
+                locks_released = _time()
 
             locked_duration = locks_released - self.lock_and_vote_times[0]
             between_vote_and_finish = finish_entry - self.lock_and_vote_times[1]
@@ -588,12 +588,12 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 perf_logger
             )
             self.shared_state.stat_timing(
-                'relstorage.storage.tpc_vote.objects_locked',
+                'relstorage.storage.tpc_vote.objects_locked.t',
                 locked_duration,
                 METRIC_SAMPLE_RATE
             )
             self.shared_state.stat_timing(
-                'relstorage.storage.tpc_vote.between_vote_and_finish',
+                'relstorage.storage.tpc_vote.between_vote_and_finish.t',
                 between_vote_and_finish,
                 METRIC_SAMPLE_RATE
             )

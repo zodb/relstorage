@@ -220,8 +220,20 @@ class SharedTPCState(object):
             client.sendbuf(buf)
 
     def stat_timing(self, stat, value, rate=1):
+        """
+        Record a timing value.
+
+        For compatibility with the default settings of ``perfmetrics``,
+        the stat name should end in ``.t``
+
+        The *value* should be a floating point difference of seconds
+        (eg, ``time.time() - time.time()``). This will be converted to an integer
+        number of milliseconds (again for consistency with ``perfmetrics``).
+        """
         client = statsd_client()
         if client is not None:
+            # scale from float seconds to milliseconds
+            value = int(value * 1000.0)
             client.timing(stat, value, rate, self._statsd_buf)
 
     def stat_count(self, stat, value, rate=1):
@@ -346,7 +358,7 @@ class AbstractTPCStateDatabaseAvailable(object):
         resources = sorted(global_tx._resources, key=rm_key)
         return "transaction=%r resources=%r" % (global_tx, resources)
 
-    def tpc_finish(self, storage, transaction, f=None): # pylint:disable=unused-argument
+    def tpc_finish(self, storage, transaction, f=None, _time=None): # pylint:disable=unused-argument
         # For the sake of some ZODB tests, we need to implement this everywhere,
         # even if it's not actually usable, and the first thing it needs to
         # do is check the transaction.

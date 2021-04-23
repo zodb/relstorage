@@ -176,12 +176,18 @@ class _TPCFinishMixin(object):
         vote.lock_and_vote_times[0] = 1
         vote.lock_and_vote_times[1] = 1
 
-        vote.tpc_finish(vote.shared_state._storage, vote.transaction)
+        finish_times = [2, 3]
+        def time():
+            return finish_times.pop()
+
+        vote.tpc_finish(vote.shared_state._storage, vote.transaction, _time=time)
 
         assert_that(self.stat_client,
                     contains_exactly(
-                        is_timer('relstorage.storage.tpc_vote.objects_locked'),
-                        is_timer('relstorage.storage.tpc_vote.between_vote_and_finish')
+                        # 2 - 1 as ms = 1000
+                        is_timer('relstorage.storage.tpc_vote.objects_locked.t', '1000'),
+                        # 3 - 1 as ms = 2000
+                        is_timer('relstorage.storage.tpc_vote.between_vote_and_finish.t', '2000')
                     ))
 
 

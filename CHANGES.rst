@@ -5,7 +5,11 @@
 3.4.5 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Scale the new timing metrics introduced in 3.4.2 to milliseconds.
+  This matches the scale of other timing metrics produced
+  automatically by the use of ``perfmetrics`` in this package.
+  Similarly, append ``.t`` to the end of their names for the same
+  reason.
 
 
 3.4.4 (2021-04-23)
