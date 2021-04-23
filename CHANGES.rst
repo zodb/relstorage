@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.4 (unreleased)
+3.4.4 (2021-04-23)
 ==================
 
 - Fix an exception sending stats when TPC is aborted because of an error
