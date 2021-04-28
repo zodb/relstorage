@@ -25,7 +25,6 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
-import os
 
 from transaction.interfaces import NoTransaction
 from transaction._transaction import rm_key
@@ -42,6 +41,7 @@ from ..interfaces import ITPCStateNotInTransaction
 from ..interfaces import ITPCStateDatabaseAvailable
 from ...adapters.connections import ClosedConnection
 from ..._util import Lazy as BaseLazy
+from ..._util import get_boolean_from_environ
 
 from .temporary_storage import TemporaryStorage
 
@@ -57,7 +57,11 @@ _CLOSED_CONNECTION = ClosedConnection()
 #:
 #: If this is necessary, this is probably a bug in RelStorage; please report
 #: it.
-LOCK_EARLY = os.environ.get('RELSTORAGE_LOCK_EARLY')
+LOCK_EARLY = get_boolean_from_environ(
+    'RELSTORAGE_LOCK_EARLY',
+    False,
+    logger=logger,
+)
 
 
 class _LazyResource(BaseLazy):

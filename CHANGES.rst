@@ -2,10 +2,24 @@
  Changes
 =========
 
-3.4.6 (unreleased)
+3.5.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Increase the default value of the ``RS_CACHE_MVCC_MAX_DEPTH``
+  advanced tuning parameter from 100 to 1000 based on observations of
+  production workloads. (Connections that haven't polled
+  for the last ``RS_CACHE_MVCC_MAX_DEPTH`` committed transactions ---
+  and thus are expected to have a large number of invalidations ---
+  are "detached" and forced to invalidate their entire persistent
+  object cache if they get used again.)
+
+- Add StatsD counter metric
+  "relstorage.cache.mvcc.invalidate_all_detached" that is incremented
+  when a previously-detached Connection is required to invalidate its
+  entire persistent object cache. In a well-tuned environment, this
+  counter should be very low and as such is not sampled but always sent.
+
+- Fix the logging of some environment variables RelStorage uses.
 
 
 3.4.5 (2021-04-23)
