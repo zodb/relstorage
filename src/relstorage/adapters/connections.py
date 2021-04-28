@@ -368,7 +368,8 @@ class StoreConnectionPool(object):
 
     MAX_STORE_CONNECTIONS_IN_POOL = get_positive_integer_from_environ(
         'RS_MAX_POOLED_STORE_CONNECTIONS',
-        None
+        None,
+        logger=logger
     )
 
     def __init__(self, connmanager):

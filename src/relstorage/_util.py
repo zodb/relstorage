@@ -200,7 +200,7 @@ def get_duration_from_environ(environ_name, default, logger=_logger):
 
 def _get_log_time_level(level_int, default):
     level_name = logging.getLevelName(level_int)
-    val = get_duration_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default)
+    val = get_duration_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default, logger=perf_logger)
     return (level_int, float(val))
 
 # A list of tuples (level_int, min_duration), ordered by increasing
@@ -320,7 +320,8 @@ def log_timed_only_self(func):
 
 _ThreadWithReady = None
 
-METRIC_SAMPLE_RATE = get_non_negative_float_from_environ('RS_PERF_STATSD_SAMPLE_RATE', 0.1)
+METRIC_SAMPLE_RATE = get_non_negative_float_from_environ('RS_PERF_STATSD_SAMPLE_RATE', 0.1,
+                                                         logger=perf_logger)
 
 metricmethod_sampled = Metric(method=True, rate=METRIC_SAMPLE_RATE)
 
