@@ -13,8 +13,10 @@ runs:
           # into /usr/local/lib as of 1.1
           brew install mysql
           # homebrew tends to get a current-ish version of PostgreSQL. At this writing,
-          # Jan 2021, it has PostgreSQL 13.1.
-          brew install postgresql
+          # Jan 2021, it has PostgreSQL 13.1; as-of Apr 28 2021 it has
+          # 13.2_2 and thinks that postgresql 13.2_1 is already
+          # installed; it won't upgrade automatically
+          brew install postgresql || brew upgrade postgresql
           brew install libmemcached
           brew install openssl
           echo LDFLAGS=$LDFLAGS -L/usr/local/opt/openssl@1.1/lib >> $GITHUB_ENV

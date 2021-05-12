@@ -19,7 +19,6 @@ from __future__ import print_function
 
 import importlib
 import sys
-import os
 
 from zope.interface import directlyProvides
 from zope.interface import implementer
@@ -27,7 +26,7 @@ from zope.interface import implementer
 from .._compat import PYPY
 from .._compat import PY3
 from .._compat import casefold
-from .._util import positive_integer
+from .._util import get_positive_integer_from_environ
 from .._util import consume
 
 from .interfaces import IDBDriver
@@ -128,8 +127,9 @@ class AbstractModuleDriver(object):
     #: DB-API extension. We default to 1024, but the environment variable
     #: RS_CURSOR_ARRAYSIZE can be set to an int to change this default.
     #: Individual drivers *might* choose a different default.
-    cursor_arraysize = positive_integer(
-        os.environ.get('RS_CURSOR_ARRAYSIZE', '1024')
+    cursor_arraysize = get_positive_integer_from_environ(
+        'RS_CURSOR_ARRAYSIZE', 1024,
+        logger=logger,
     )
 
     DriverNotAvailableError = DriverNotAvailableError

@@ -69,6 +69,12 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = None
         self.viewer.adapter.poller.poll_invalidations = self.poll_invalidations
         self.viewer.adapter.poller.get_current_tid = self.get_current_tid
+        from perfmetrics import set_statsd_client
+        from perfmetrics import statsd_client
+        from perfmetrics.testing import FakeStatsDClient
+        self.stat_client = FakeStatsDClient()
+        self.__orig_client = statsd_client()
+        set_statsd_client(self.stat_client)
 
     def get_current_tid(self, _cursor):
         return self.polled_tid
@@ -90,6 +96,8 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.coord.unregister(self.viewer)
         self.viewer = None
         self.coord = None
+        from perfmetrics import set_statsd_client
+        set_statsd_client(self.__orig_client)
 
     def _makeOne(self):
         return mvcc.MVCCDatabaseCoordinator()
@@ -480,6 +488,20 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertEqual(local_client.invalid_oids, [
             3, 4, 5, 6, 7, 8, 9, 10
         ])
+
+    def test_find_changes_for_viewer_produces_detached_stat(self):
+        from perfmetrics.testing.matchers import is_counter
+        from hamcrest import contains_exactly
+        coord = self.coord
+        viewer = self.viewer
+        viewer.detached = True
+        coord._find_changes_for_viewer(viewer, None)
+        assert_that(
+            self.stat_client,
+            contains_exactly(
+                is_counter('relstorage.cache.mvcc.invalidate_all_detached', '1')
+            )
+        )
 
 class TestTransactionRangeObjectIndex(TestCase):
 

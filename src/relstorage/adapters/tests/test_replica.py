@@ -72,9 +72,8 @@ class ReplicaSelectorTests(unittest.TestCase):
         rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs.current(), 'example.com:1234')
         # change the file and get the new current replica
-        f = open(self.fn, 'w')
-        f.write('localhost\nalternate\n')
-        f.close()
+        with open(self.fn, 'w') as f:
+            f.write('localhost\nalternate\n')
         rs._config_checked = 0
         rs._config_modified = 0
         self.assertEqual(rs.current(), 'localhost')
@@ -106,9 +105,8 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test_next_only_one_server(self):
         from relstorage.adapters.replica import ReplicaSelector
-        f = open(self.fn, 'w')
-        f.write('localhost\n')
-        f.close()
+        with open(self.fn, 'w') as f:
+            f.write('localhost\n')
         rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs.current(), 'localhost')
         self.assertEqual(rs.next(), None)
@@ -119,9 +117,8 @@ class ReplicaSelectorTests(unittest.TestCase):
         self.assertEqual(rs.current(), 'example.com:1234')
         self.assertEqual(rs.next(), 'localhost:4321')
         # interrupt the iteration by changing the replica conf file
-        f = open(self.fn, 'w')
-        f.write('example.com:9999\n')
-        f.close()
+        with open(self.fn, 'w') as f:
+            f.write('example.com:9999\n')
         rs._config_checked = 0
         rs._config_modified = 0
         self.assertEqual(rs.next(), 'example.com:9999')

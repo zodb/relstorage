@@ -35,6 +35,9 @@
 # import-outside-toplevel: New in pylint 2.4. We have a large number of deferred imports.
 # super-with-arguments and raise-missing-from: New in pylint 2.7; we can't use them because
 #   we support Python 2.
+# consider-using-with: New in pylint 2.8, catches things like ``return open(path)``, which
+#   obviously can't use a ``with`` statement. Disabled as 90% of hits (~20) were a false positive,
+#   and a few didn't apply to Python 2.
 disable=
     invalid-name,
     missing-docstring,
@@ -58,7 +61,8 @@ disable=
     import-outside-toplevel,
     relative-beyond-top-level,
     super-with-arguments,
-    raise-missing-from
+    raise-missing-from,
+    consider-using-with
 #   undefined-all-variable
 
 

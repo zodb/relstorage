@@ -66,22 +66,26 @@ class PackUndo(DatabaseHelpersMixin):
     # implementations.
     ###
     cursor_arraysize = get_positive_integer_from_environ('RS_PACK_CURSOR_ARRAYSIZE',
-                                                         4096)
+                                                         4096,
+                                                         logger=logger)
 
     # These are generally very small rows we're uploading (a few integers).
     # Be generous.
-    store_batch_size = get_positive_integer_from_environ('RS_PACK_STORE_BATCH_SIZE', 4096)
+    store_batch_size = get_positive_integer_from_environ('RS_PACK_STORE_BATCH_SIZE', 4096,
+                                                         logger=logger)
 
     # How often, in seconds, to commit work in progress.
     # This is a variable here for testing.
-    fill_object_refs_commit_frequency = get_duration_from_environ('RS_PACK_COMMIT_FREQUENCY', 120)
+    fill_object_refs_commit_frequency = get_duration_from_environ('RS_PACK_COMMIT_FREQUENCY', 120,
+                                                                  logger=logger)
 
     # How many object states to find references in at any one time.
     # This is a control on the amount of memory used by the Python
     # process during packing, especially if the database driver
     # doesn't use server-side cursors.
     fill_object_refs_batch_size = get_positive_integer_from_environ('RS_PACK_DOWNLOAD_BATCH_SIZE',
-                                                                    1024)
+                                                                    1024,
+                                                                    logger=logger)
 
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
@@ -459,7 +463,8 @@ class HistoryPreservingPackUndo(PackUndo):
 
     delete_empty_transactions_batch_size = get_positive_integer_from_environ(
         'RS_PACK_HP_DELETE_BATCH_SIZE',
-        1000
+        1000,
+        logger=logger
     )
 
     _delete_empty_transactions_batch_query = Schema.transaction.delete(

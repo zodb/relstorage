@@ -19,8 +19,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
 from logging import DEBUG as LDEBUG
+
+from perfmetrics import statsd_client
 
 from zope.interface import implementer
 
@@ -33,7 +34,7 @@ from relstorage._compat import OID_SET_TYPE as OidSet
 from relstorage._compat import iteroiditems
 from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import log_timed
-from relstorage._util import positive_integer
+from relstorage._util import get_positive_integer_from_environ
 from relstorage._util import TRACE as LTRACE
 from relstorage._util import get_duration_from_environ
 from relstorage._mvcc import DetachableMVCCDatabaseCoordinator
@@ -50,7 +51,7 @@ DEBUG = __debug__ and IN_TESTRUNNER
 #: database for OIDS when restoring the cache. If this time is exceeded,
 #: we will only partially use the cache. This is not set by default because
 #: doing so introduces a slight speed penalty to the polling process.
-POLL_TIMEOUT = get_duration_from_environ('RS_CACHE_POLL_TIMEOUT', None)
+POLL_TIMEOUT = get_duration_from_environ('RS_CACHE_POLL_TIMEOUT', None, logger=logger)
 
 ###
 # Notes on in-process concurrency:
@@ -545,17 +546,32 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
     """
 
     # Essentially how many transactions any one viewer is allowed to
-    # get behind the leading edge before we cut it off. The next time it polls,
-    # it will drop its ZODB object cache. This probably indicates an idle connection
-    # without a connection pool idle timeout configured, or a very long-duration
-    # read transaction.
-    max_allowed_index_depth = positive_integer(
-        os.environ.get('RS_CACHE_MVCC_MAX_DEPTH', '100')
+    # get behind the leading edge before we cut it off. The next time
+    # it polls, it will drop its ZODB object cache. When configured
+    # properly, this may indicate an idle connection without a
+    # connection pool idle timeout configured, or a very long-duration
+    # read transaction. It sites with high transaction turnover, but
+    # few concurrent requests to any given process, it may also
+    # indicate low concurrency, e.g., the first connection in the pool
+    # is used most of the time, and by the time there's two concurrent
+    # connections in use, the second one has been detached.
+    #
+    # Observations in a production site with a one-hour ZODB
+    # connection pool timeout show that the old default of 100 was
+    # detaching a connection at anywhere from 1 minute to 20 minutes
+    # since it had been used. But 88% of detached connections (2546
+    # detached, 2249 polled again) were used again after flushing their
+    # entire object cache.
+    #
+    # So we bump the default to 1000.
+    max_allowed_index_depth = get_positive_integer_from_environ(
+        'RS_CACHE_MVCC_MAX_DEPTH', 1000, logger=logger
     )
 
     # The total number of entries in the object index we allow
     # before we start cutting off old viewers. This gets set from
-    # Options.cache_delta_size_limit
+    # Options.cache_delta_size_limit. A full structure with the default
+    # size (200,000) occupies 6.6MB of memory with C BTrees.
     max_allowed_index_size = 100000
     object_index = None
 
@@ -776,6 +792,12 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                 "Invalidating all persistent objects for viewer %r (detached? %s)",
                 viewer, viewer.detached
             )
+            if viewer.detached:
+                client = statsd_client()
+                if client is not None:
+                    client.incr('relstorage.cache.mvcc.invalidate_all_detached',
+                                1,
+                                1) # Always send, not a sample. Should be rare.
             return None
 
         # Somewhere in the index is a map with the highest visible tid

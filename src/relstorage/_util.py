@@ -51,8 +51,8 @@ from relstorage._compat import update_wrapper
 from relstorage._compat import perf_counter
 from relstorage._compat import IN_TESTRUNNER
 
-logger = logging.getLogger(__name__)
-perf_logger = logger.getChild('timing')
+_logger = logging.getLogger('relstorage')
+perf_logger = _logger.getChild('timing')
 
 int64_to_8bytes = p64
 bytes8_to_int64 = u64
@@ -60,31 +60,37 @@ bytes8_to_int64 = u64
 __all__ = [
     'int64_to_8bytes',
     'bytes8_to_int64',
-    'timestamp_at_unixtime',
-    'timer',
+
+    'CachedIn',
+    'Lazy',
+    'TRACE',
+    'byte_display',
+    'consume',
+
+    'get_duration_from_environ',
+    'get_positive_integer_from_environ',
+    'get_non_negative_float_from_environ',
+    'get_boolean_from_environ',
+
+    'get_memory_usage',
     'log_timed',
     'log_timed_only_self',
-    'thread_spawn',
-    'spawn',
-    'get_memory_usage',
-    'byte_display',
-    'Lazy',
-    'CachedIn',
-    'to_utf8',
-    'consume',
-    'TRACE',
+    'metricmethod',
+    'metricmethod_sampled',
     'parse_boolean',
     'parse_byte_size',
     'positive_integer',
-    'get_duration_from_environ',
-    'metricmethod',
-    'metricmethod_sampled',
+    'spawn',
+    'thread_spawn',
+    'timer',
+    'timestamp_at_unixtime',
+    'to_utf8',
 ]
 
 positive_integer = RangeCheckedConversion(integer, min=1)
 non_negative_float = RangeCheckedConversion(float, min=0)
 
-def _setting_from_environ(converter, environ_name, default):
+def _setting_from_environ(converter, environ_name, default, logger):
     result = default
     env_val = os.environ.get(environ_name, default)
     if env_val is not default:
@@ -100,11 +106,11 @@ def _setting_from_environ(converter, environ_name, default):
     return result
 
 
-def get_positive_integer_from_environ(environ_name, default):
-    return _setting_from_environ(positive_integer, environ_name, default)
+def get_positive_integer_from_environ(environ_name, default, logger=_logger):
+    return _setting_from_environ(positive_integer, environ_name, default, logger)
 
-def get_non_negative_float_from_environ(environ_name, default):
-    return _setting_from_environ(non_negative_float, environ_name, default)
+def get_non_negative_float_from_environ(environ_name, default, logger=_logger):
+    return _setting_from_environ(non_negative_float, environ_name, default, logger)
 
 def parse_boolean(val):
     if val == '0':
@@ -114,6 +120,9 @@ def parse_boolean(val):
     return asBoolean(val)
 
 parse_byte_size = stock_datatypes['byte-size']
+
+def get_boolean_from_environ(environ_name, default, logger=_logger):
+    return _setting_from_environ(parse_boolean, environ_name, default, logger)
 
 def timestamp_at_unixtime(now):
     """
@@ -154,7 +163,7 @@ class timer(object):
         self.__end = self.counter()
         self.duration = self.__end - self.__begin
 
-def get_duration_from_environ(environ_name, default):
+def get_duration_from_environ(environ_name, default, logger=_logger):
     """
     Return a floating-point number of seconds from the environment *environ_name*,
     or *default*.
@@ -187,11 +196,11 @@ def get_duration_from_environ(environ_name, default):
             return delta.total_seconds()
         return float(val)
 
-    return _setting_from_environ(convert, environ_name, default)
+    return _setting_from_environ(convert, environ_name, default, logger)
 
 def _get_log_time_level(level_int, default):
     level_name = logging.getLevelName(level_int)
-    val = get_duration_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default)
+    val = get_duration_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default, logger=perf_logger)
     return (level_int, float(val))
 
 # A list of tuples (level_int, min_duration), ordered by increasing
@@ -215,16 +224,16 @@ _LOG_TIMED_DEFAULT_DURATIONS.sort(key=lambda x: x[1])
 # The 'log_details_threshold' property of the function can be
 # assigned to make it different than the default.
 _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = logging.getLevelName(
-    _setting_from_environ(str, 'RS_PERF_LOG_DETAILS_LEVEL', 'WARN')
+    _setting_from_environ(str, 'RS_PERF_LOG_DETAILS_LEVEL', 'WARN', logger=perf_logger)
 )
 
 
 # If this is true when a module is imported, timer decorations
 # are omitted.
-_LOG_TIMED_COMPILETIME_ENABLE = _setting_from_environ(
-    parse_boolean,
+_LOG_TIMED_COMPILETIME_ENABLE = get_boolean_from_environ(
     'RS_PERF_LOG_ENABLE',
-    'on'
+    'on',
+    logger=perf_logger,
 )
 
 def do_log_duration_info(basic_msg, func,
@@ -311,7 +320,8 @@ def log_timed_only_self(func):
 
 _ThreadWithReady = None
 
-METRIC_SAMPLE_RATE = get_non_negative_float_from_environ('RS_PERF_STATSD_SAMPLE_RATE', 0.1)
+METRIC_SAMPLE_RATE = get_non_negative_float_from_environ('RS_PERF_STATSD_SAMPLE_RATE', 0.1,
+                                                         logger=perf_logger)
 
 metricmethod_sampled = Metric(method=True, rate=METRIC_SAMPLE_RATE)
 
@@ -379,7 +389,7 @@ def spawn(func, args=()):
         if gevent.monkey.is_module_patched('threading'):
             submit = _gevent_pool_spawn
 
-    logger.debug("Using %s to run %s", submit, func)
+    _logger.log(TRACE, "Using %s to run %s", submit, func)
     return submit(func, args)
 
 def get_this_psutil_process():
