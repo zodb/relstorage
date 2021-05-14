@@ -195,14 +195,17 @@ class AbstractAdapter(DatabaseHelpersMixin):
         begin = time.time()
         try:
             return self._best_lock_objects_and_detect_conflicts(cursor, read_current_oids)
-        except self.locker.lock_exceptions:
+        except self.locker.lock_exceptions as ex:
             # Heuristic to guess. If the stored proc or stored proc runner can do better,
             # they should.
             elapsed = time.time() - begin
             kind = UnableToLockRowsToModifyError
             if read_current_oids and elapsed < self.locker.commit_lock_timeout:
                 kind = UnableToLockRowsToReadCurrentError
-
+            if 'deadlock' in str(ex):
+                # With postgresql asd psycopg2, we can use the pgcode to get this.
+                kind = UnableToLockRowsToModifyError
+            del ex
             self.locker.reraise_commit_lock_error(
                 cursor,
                 self._describe_best_lock_objects_and_detect_conflicts(),

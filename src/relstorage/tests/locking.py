@@ -478,3 +478,132 @@ class TestLocking(TestCase):
         # This is an anti-pattern. we really should subclass the tests
         # in our testoracle.py file.
         return self._storage._adapter.schema.database_type == 'oracle'
+
+    @skipIfNoConcurrentWriters
+    def checkTL_manualInterleavedConflictingReadCurrentDeadlock(self):
+        #
+        # This is like ``checkTL_InterleavedConflictingReadCurrentDeadlock``,
+        # but we manually interleave using a third connection, so we can
+        # use the stored procs.
+        #
+        # Prior to RelStorage 3.5, this was the sequence:
+        # Three objects, 0, 1, 2.
+        # Thee connections: A, B, C.
+        # (1) Connection A takes a shared lock on object 0, 1, and 2.
+        #     Object 0 is used as as stop point to control the other transactions.
+        #
+        # (2) Connection B begins the regular commit sequence:
+        #     shared lock on object 1, exclusive lock on object 0 and 2.
+        #     It will be prevented from getting this by Connection A, and block.
+        #
+        # (3) Connection C begins the regular commit sequence:
+        #     shared lock on object 2 (which it should get),
+        #     exclusive lock on object 0 and 1. This is held by both A and B.
+        #
+        # (4) Connection A aborts, releasing its shared locks.
+        #     Connection B is free to move forward and try to take the lock on
+        #     2; it is prevented by Connection C.
+        #     Connection C, meanwhile is prevented from getting the exclusive lock
+        #     on object 1 by the shared locke held by connection B. B and C
+        #     are deadlocked. One of B or C dies with a deadlock error.
+        # pylint:disable=too-many-locals,too-many-statements
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        from relstorage.adapters.interfaces import UnableToAcquireLockError
+
+        store_conn_pool = self._storage._store_connection_pool
+        self.assertEqual(store_conn_pool.instance_count, 1)
+
+        storageB = self._closing(self._storage.new_instance())
+        storageC = self._closing(self._storage.new_instance())
+        storageB.last_error = storageC.last_error = None
+
+        self.assertEqual(store_conn_pool.instance_count, 3)
+
+        db = self._closing(DB(self._storage, pool_size=1))
+        conn = db.open()
+        root = conn.root()
+        root['object1'] = MinPO('object1')
+        root['object2'] = MinPO('object2')
+        transaction.commit()
+
+        obj0_oid = root._p_oid
+        obj1_oid = root['object1']._p_oid
+        obj2_oid = root['object2']._p_oid
+        prev_tid = root._p_serial
+
+        txa = TransactionMetaData()
+        txb = TransactionMetaData()
+        txc = TransactionMetaData()
+        self._storage.tpc_begin(txa)
+        storageB.tpc_begin(txb)
+        storageC.tpc_begin(txc)
+
+        # (1)
+        # self._storage._adapter.locker._lock_readCurrent_oids_for_share(
+        #     self._storage._tpc_phase.shared_state.store_connection.cursor,
+        #     [bytes8_to_int64(x) for x in (obj0_oid, obj1_oid, obj2_oid)],
+        #     shared_locks_block=True
+        # )
+        for oid in obj0_oid, obj1_oid, obj2_oid:
+            self._storage.checkCurrentSerialInTransaction(oid, prev_tid, txa)
+        self._storage.tpc_vote(txa)
+
+        # (2a)
+        storageB.checkCurrentSerialInTransaction(obj1_oid, prev_tid, txb)
+        storageB.store(obj0_oid, prev_tid, b'bad pickle', '', txb)
+        storageB.store(obj2_oid, prev_tid, b'bad pickle', '', txb)
+
+        # The voting has to be in a thread because it blocks
+        cond = threading.Condition()
+        def do_vote(storage, tx):
+            cond.acquire(5)
+            cond.notifyAll()
+            cond.release()
+            try:
+                storage.tpc_vote(tx)
+            except UnableToAcquireLockError as ex:
+                storage.last_error = ex
+
+        thread_locking_b = threading.Thread(
+            target=do_vote,
+            args=(storageB, txb),
+            name='thread_locking_b',
+        )
+
+        # (3a)
+        storageC.checkCurrentSerialInTransaction(obj2_oid, prev_tid, txc)
+        storageC.store(obj0_oid, prev_tid, b'bad pickle', '', txc)
+        storageC.store(obj1_oid, prev_tid, b'bad pickle', '', txc)
+        thread_locking_c = threading.Thread(
+            target=do_vote,
+            args=(storageC, txc),
+            name='thread_locking_c',
+        )
+
+        # (2b)
+        cond.acquire(5)
+        thread_locking_b.start()
+        cond.wait(5)
+        cond.release()
+
+        # (2b)
+        cond.acquire(5)
+        thread_locking_c.start()
+        cond.wait(5)
+        cond.release()
+
+        # (4)
+        # Release the locks and let the other connections proceed.
+        # Sleep for a bit to be sure they've had a chance to send off
+        # their queries
+        time.sleep(0.2)
+        self._storage.tpc_abort(txa)
+
+        thread_locking_b.join(40)
+        thread_locking_c.join(40)
+
+        # Only one process produced an error
+        self.assertTrue(bool(storageB.last_error) ^ bool(storageC.last_error))
+        exc = storageB.last_error or storageC.last_error
+        self.assertIn('deadlock', str(exc))
+        self.assertIsInstance(exc, UnableToLockRowsToModifyError)
