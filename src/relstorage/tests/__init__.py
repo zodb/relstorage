@@ -136,6 +136,13 @@ class TestCase(unittest.TestCase):
         self.assertEqual(len(container), length,
                          '%s -- %s' % (msg, container) if msg else container)
 
+    def assertExceptionNotCausedByDeadlock(self, exc, storage):
+        cause = exc
+        while cause is not None:
+            if storage._adapter.driver.exception_is_deadlock(cause):
+                raise AssertionError("Exception was a deadlock.", exc)
+            cause = getattr(cause, '__relstorage_cause__', None)
+
 def skipIfNoConcurrentWriters(func):
     # Skip the test if only one writer is allowed at a time.
     # e.g., sqlite

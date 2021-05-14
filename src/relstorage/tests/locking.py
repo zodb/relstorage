@@ -173,8 +173,9 @@ class TestLocking(TestCase):
         txb = None
         before = time.time()
         if exception_in_b:
-            with self.assertRaises(exception_in_b):
+            with self.assertRaises(exception_in_b) as exc:
                 lock_b()
+            self.assertExceptionNotCausedByDeadlock(exc.exception, self._storage)
         else:
             txb = lock_b()
         after = time.time()
@@ -252,9 +253,9 @@ class TestLocking(TestCase):
         txa = self.__read_current_and_lock(storageA, None, obj1_oid, new_tid)
 
         # Prove that it's locked. (This is slow on MySQL 5.7)
-        with self.assertRaises(UnableToLockRowsToModifyError):
+        with self.assertRaises(UnableToLockRowsToModifyError) as exc:
             self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
-
+        self.assertExceptionNotCausedByDeadlock(exc.exception, storageC)
         # Now, try to readCurrent of object2 in the old tid, and take an exclusive lock
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
@@ -262,38 +263,37 @@ class TestLocking(TestCase):
             self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
         # Which is still held because we cannot lock it.
-        with self.assertRaises(UnableToLockRowsToModifyError):
+        with self.assertRaises(UnableToLockRowsToModifyError) as exc:
             self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
-
+        self.assertExceptionNotCausedByDeadlock(exc.exception, storageC)
         storageA.tpc_abort(txa)
 
     @skipIfNoConcurrentWriters
     @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
+        # Relstorage 3, prior to relstorage 3.5:
         # Starting with two objects 1 and 2, if transaction A modifies 1 and
         # does readCurrent of 2, up through the voting phase, and transaction B does
         # exactly the opposite, transaction B is immediately killed with a read conflict
         # error. (We use the same two objects instead of a new object in transaction B to prove
         # shared locks are taken first.)
-        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        #
+        # In Relstorage 3.5, the order is reversed (the 'first' in the
+        # name is no longer accurate) and transaction B waits on
+        # transaction A to finish and we *should* get
+        # ``UnableToLockRowsToModifyError``; However, this is all very
+        # timing sensitive, and the test is not fully reliable, beyond generating a
+        # ``UnableToAcquireLockError``
+        from relstorage.adapters.interfaces import UnableToAcquireLockError
         commit_lock_timeout = self.__tiny_commit_time
-        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToLockRowsToReadCurrentError,
+        _duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToAcquireLockError,
             commit_lock_timeout=commit_lock_timeout,
         )
-        # The NOWAIT lock should be very quick to fire.
+        # The NOWAIT lock should be very quick to fire...but we don't actually hit that case
+        # first, we hit the commit_lock_timeout first. Usually.
         assert self._storage._adapter.locker.supports_row_lock_nowait is not None
-        if self._storage._adapter.locker.supports_row_lock_nowait:
-            multiplier = 1.5
-            if RUNNING_ON_CI:
-                # Give some extra time on CI since the resources are shared
-                # and often extremely limited.
-                multiplier = 2.1
-            self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
-        else:
-            # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
-            self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
-
+        #self.assertGreaterEqual(duration_blocking, commit_lock_timeout)
 
     def __lock_rows_being_modified_only(self, storage, cursor,
                                         _current_oids, _share_blocks,
@@ -323,14 +323,15 @@ class TestLocking(TestCase):
         # its exclusive locks to let txB take *its* exclusive locks.
         # Then txB can go for the shared locks, which will block if
         # we're not in ``NOWAIT`` mode for shared locks. This tests
-        # that we don't block, we report a retryable error. Note that
-        # we don't adjust the commit_lock_timeout; it doesn't apply.
+        # we report a retryable error.
+        #
+        # We don't adjust the commit_lock_timeout; it doesn't apply.
         #
         # If we're using a stored procedure, this test will break
         # because we won't be able to force the interleaving, so we make it
         # use the old version.
 
-        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        from relstorage.adapters.interfaces import UnableToAcquireLockError
         storageA = self._closing(self._storage.new_instance())
         # This turns off stored procs and lets us control that phase.
         storageA._adapter.force_lock_objects_and_detect_conflicts_interleavable = True
@@ -340,12 +341,13 @@ class TestLocking(TestCase):
             storageA)
 
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToLockRowsToReadCurrentError,
+            UnableToAcquireLockError,
             storageA=storageA,
-            copy_interleave=()
+            copy_interleave=(),
         )
 
         self.__assert_small_blocking_duration(storageA, duration_blocking)
+
 
     @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrentDeadlock(self):
@@ -505,9 +507,18 @@ class TestLocking(TestCase):
         #     2; it is prevented by Connection C.
         #     Connection C, meanwhile is prevented from getting the exclusive lock
         #     on object 1 by the shared locke held by connection B. B and C
-        #     are deadlocked. One of B or C dies with a deadlock error.
+        #     are deadlocked. One of B or C dies with a deadlock error "instantly".
+        #
+        # This happened because shared NOWAIT locks were always taken
+        # before exclusive locks. The problem is that the deadlock
+        # error forced a transaction retry and prevented conflict
+        # resolution. So we reverse the order and rely on NOWAIT to prevent
+        # deadlocks. (We try to mitigate time spent
+        # waiting to take exclusive locks by running a quick check for
+        # readCurrent errors first). If there are no readCurrent
+        # errors, we have a chance to fix any conflicts.
+        #
         # pylint:disable=too-many-locals,too-many-statements
-        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
         from relstorage.adapters.interfaces import UnableToAcquireLockError
 
         store_conn_pool = self._storage._store_connection_pool
@@ -539,11 +550,6 @@ class TestLocking(TestCase):
         storageC.tpc_begin(txc)
 
         # (1)
-        # self._storage._adapter.locker._lock_readCurrent_oids_for_share(
-        #     self._storage._tpc_phase.shared_state.store_connection.cursor,
-        #     [bytes8_to_int64(x) for x in (obj0_oid, obj1_oid, obj2_oid)],
-        #     shared_locks_block=True
-        # )
         for oid in obj0_oid, obj1_oid, obj2_oid:
             self._storage.checkCurrentSerialInTransaction(oid, prev_tid, txa)
         self._storage.tpc_vote(txa)
@@ -555,6 +561,7 @@ class TestLocking(TestCase):
 
         # The voting has to be in a thread because it blocks
         cond = threading.Condition()
+        cond.storage_finished = None
         def do_vote(storage, tx):
             cond.acquire(5)
             cond.notifyAll()
@@ -563,6 +570,11 @@ class TestLocking(TestCase):
                 storage.tpc_vote(tx)
             except UnableToAcquireLockError as ex:
                 storage.last_error = ex
+            finally:
+                cond.storage_finished = storage, tx
+                cond.acquire(5)
+                cond.notifyAll()
+                cond.release()
 
         thread_locking_b = threading.Thread(
             target=do_vote,
@@ -599,11 +611,20 @@ class TestLocking(TestCase):
         time.sleep(0.2)
         self._storage.tpc_abort(txa)
 
-        thread_locking_b.join(40)
-        thread_locking_c.join(40)
+        # Wait for at least one of them to finish...
+        cond.acquire(5)
+        cond.wait(5)
+        cond.release()
+        # then abort it, releasing the other storage to finish.
+        cond.storage_finished[0].tpc_abort(cond.storage_finished[1])
 
-        # Only one process produced an error
-        self.assertTrue(bool(storageB.last_error) ^ bool(storageC.last_error))
-        exc = storageB.last_error or storageC.last_error
-        self.assertIn('deadlock', str(exc))
-        self.assertIsInstance(exc, UnableToLockRowsToModifyError)
+        cond.acquire(5)
+        cond.wait(5)
+        cond.release()
+
+        thread_locking_b.join(1)
+        thread_locking_c.join(1)
+
+        # Neither one produced an error
+        self.assertIsNone(storageB.last_error)
+        self.assertIsNone(storageC.last_error)

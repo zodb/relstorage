@@ -146,6 +146,7 @@ class AbstractMySQLDriver(AbstractModuleDriver):
 
         kv = ["%s=%s" % (k, v) for k, v in self.MY_SESSION_VARS.items()]
         self._init_command = "SET " + ", ".join(kv)
+        self.mysql_deadlock_exc = self.driver_module.OperationalError
 
     _server_side_cursor = None
 
@@ -233,6 +234,16 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     def exit_critical_phase(self, connection, cursor):
         "Override if you implement critical phases."
 
+    ERRCODE_DEADLOCK = 1213
+
+    def exception_is_deadlock(self, exc):
+        # OperationalError: (1213, 'Failed to get exclusive locks.')
+        # This works for mysqldb and PyMySQL. Naturally it doesn't work for
+        # mysqlconnector, where it is just a DatabaseError. Hence the indirection.
+        return (
+            isinstance(exc, self.mysql_deadlock_exc)
+            and self.ERRCODE_DEADLOCK in exc.args
+        )
 
 implement_db_driver_options(
     __name__,

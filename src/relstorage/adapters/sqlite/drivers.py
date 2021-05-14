@@ -571,6 +571,9 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
             isolation_level=isolation_level
         )
 
+    def exception_is_deadlock(self, exc):
+        # Not possible in sqlite, only one writer
+        return False
 
 
 

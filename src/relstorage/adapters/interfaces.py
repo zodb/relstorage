@@ -197,6 +197,14 @@ class IDBDriver(Interface):
     def exit_critical_phase(connection, cursor):
         "If currently in a critical phase, de-escalate."
 
+    def exception_is_deadlock(exc):
+        """
+        Given an exception object, return True if it represents a deadlock
+        in the database.
+
+        The exception need not be an exception produced by the driver.
+        """
+
 class IDBDriverSupportsCritical(IDBDriver):
     """
     A marker for database drivers that support
@@ -1526,6 +1534,9 @@ class IRelStorageAdapter(Interface):
         deadlock detection, and starting with MySQL 8, it supports
         ``NOWAIT``.
 
+        In both implementations, though, deadlocks lead to annoying
+        database server error logs, so they should be avoided.
+
         .. rubric:: Lock Order
 
         The original strategy was to first take exclusive locks of
@@ -1659,6 +1670,9 @@ class UnableToLockRowsToModifyError(ConflictError, UnableToAcquireLockError):
 
     This is a type of ``ConflictError``, which is a transient error.
     """
+
+class UnableToLockRowsDeadlockError(UnableToLockRowsToModifyError):
+    pass
 
 class UnableToLockRowsToReadCurrentError(ReadConflictError, UnableToAcquireLockError):
     """

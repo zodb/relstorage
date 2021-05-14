@@ -255,9 +255,11 @@ class AbstractLocker(DatabaseHelpersMixin,
             sys.exc_info()[1],
             '\n' + debug_info if debug_info else '(No debug info.)'
         )
+        val = kind(message)
+        val.__relstorage_cause__ = sys.exc_info()[1]
         six.reraise(
             kind,
-            kind(message),
+            val,
             sys.exc_info()[2])
 
     # MySQL allows aggregates in the top level to use FOR UPDATE,

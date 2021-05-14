@@ -325,7 +325,7 @@ class MySQLAdapter(AbstractAdapter):
             # On MySQL 5.7, the time-based mechanism to determine that
             # we failed to take NOWAIT shared locks is not reliable
             # when the commit lock timeout is very small (close to 1),
-            # because it can take several seconds for the procedure te
+            # because it can take several seconds for the procedure to
             # error out. Thus we provide a specific error message that
             # we key off. (We don't change errno or state or anything
             # like that in case anybody introspects that stuff.)

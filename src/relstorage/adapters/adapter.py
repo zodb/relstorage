@@ -38,7 +38,7 @@ from ..options import Options
 from ._util import DatabaseHelpersMixin
 from .drivers import _select_driver
 from .interfaces import UnableToLockRowsToModifyError
-from .interfaces import UnableToLockRowsToReadCurrentError
+from .interfaces import UnableToLockRowsDeadlockError
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -192,19 +192,16 @@ class AbstractAdapter(DatabaseHelpersMixin):
             # various concurrency situations.
             return self._composed_lock_objects_and_detect_conflicts(cursor,
                                                                     read_current_oids)
-        begin = time.time()
         try:
             return self._best_lock_objects_and_detect_conflicts(cursor, read_current_oids)
         except self.locker.lock_exceptions as ex:
-            # Heuristic to guess. If the stored proc or stored proc runner can do better,
-            # they should.
-            elapsed = time.time() - begin
+            # Heuristic to guess.
+            # XXX: we should do a lot better. We used to be time based, but since we take
+            # exclusive locks first, that's now useless.
             kind = UnableToLockRowsToModifyError
-            if read_current_oids and elapsed < self.locker.commit_lock_timeout:
-                kind = UnableToLockRowsToReadCurrentError
-            if 'deadlock' in str(ex):
-                # With postgresql asd psycopg2, we can use the pgcode to get this.
-                kind = UnableToLockRowsToModifyError
+            if self.driver.exception_is_deadlock(ex):
+                kind = UnableToLockRowsDeadlockError
+
             del ex
             self.locker.reraise_commit_lock_error(
                 cursor,
@@ -228,12 +225,13 @@ class AbstractAdapter(DatabaseHelpersMixin):
                         serials=(int64_to_8bytes(actual_tid_int),
                                  int64_to_8bytes(expect_tid_int)))
 
+        conflicts = self.mover.detect_conflict(cursor)
+
         self.locker.lock_current_objects(
             cursor, read_current_oid_ints,
             self.force_lock_readCurrent_for_share_blocking,
             after_lock_share)
 
-        conflicts = self.mover.detect_conflict(cursor)
         return conflicts
 
     #: Subclasses that have the ability to implement

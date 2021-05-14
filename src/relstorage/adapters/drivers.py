@@ -84,6 +84,7 @@ class AbstractModuleDriver(object):
     - ``__name__`` property
     - Implementation of ``get_driver_module``; this should import the
       module at runtime.
+    - Implementation of ``exception_is_deadlock``
     """
 
     #: The name of the DB-API module to import.
@@ -293,6 +294,11 @@ class AbstractModuleDriver(object):
 
     def exit_critical_phase(self, connection, cursor):
         "Default implementation; does nothing."
+
+    def exception_is_deadlock(self, exc):
+        __traceback_info__ = dir(exc), exc
+        raise NotImplementedError(type(self))
+
 
 class MemoryViewBlobDriverMixin(object):
     # psycopg2 is smart enough to return memoryview or buffer on
