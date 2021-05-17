@@ -423,7 +423,7 @@ class MockDriver(object):
         if cursor is not None:
             cursor.fetchall()
 
-    def exception_is_deadlock(self, exc):
+    def exception_is_deadlock(self, exc): # pylint:disable=unused-argument
         return None
 
 class MockObjectMover(object):
