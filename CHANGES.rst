@@ -2,8 +2,8 @@
  Changes
 =========
 
-3.5.0 (unreleased)
-==================
+3.5.0a1 (2021-05-17)
+====================
 
 - Increase the default value of the ``RS_CACHE_MVCC_MAX_DEPTH``
   advanced tuning parameter from 100 to 1000 based on observations of
