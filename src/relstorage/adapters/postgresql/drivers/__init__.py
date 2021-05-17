@@ -98,6 +98,19 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         self.exit_critical_phase(conn, cursor)
         cursor.execute(stmt, params)
 
+    ERRCODE_DEADLOCK = '40P01'
+
+    def exception_is_deadlock(self, exc):
+        # psycopg2 raises psycopg2.errors.DeadlockDetected, which is an OperationalError
+        # which is a DatabaseError. This has a pgcode attribute of ERRCODE_DEADLOCK
+        #
+        # pg8000 raises pg8000.dbapi.ProgrammingError, which is a DatabaseError.
+        if isinstance(exc, self.driver_module.DatabaseError):
+            return self._get_exception_pgcode(exc) == self.ERRCODE_DEADLOCK
+
+    def _get_exception_pgcode(self, exc):
+        return exc.pgcode
+
 database_type = 'postgresql'
 
 implement_db_driver_options(

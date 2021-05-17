@@ -21,6 +21,19 @@
 
 - Fix the logging of some environment variables RelStorage uses.
 
+- If there is a read conflict error, PostgreSQL no longer holds any
+  database locks while the error is raised and the transaction is
+  rolled back in Python. Previously, shared locks could be held during
+  this process, preventing other transactions from moving forward.
+
+- Take exclusive locks first, and then shared locks in NOWAIT mode.
+  This reverses :pr:`317`, but it eliminates the requirement that the
+  database server finds and breaks deadlocks (by eliminating
+  deadlocks). Deadlocks could never be resolved without retrying the
+  entire transaction, and which transaction got killed was unknowable.
+  Provisions are made to keep fast detection of ``readCurrent``
+  conflicts. Benchmarks with zodbshootout find no substantial
+  differences. See :issue:`469`.
 
 3.4.5 (2021-04-23)
 ==================

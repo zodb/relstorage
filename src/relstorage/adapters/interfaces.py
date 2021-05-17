@@ -197,6 +197,14 @@ class IDBDriver(Interface):
     def exit_critical_phase(connection, cursor):
         "If currently in a critical phase, de-escalate."
 
+    def exception_is_deadlock(exc):
+        """
+        Given an exception object, return True if it represents a deadlock
+        in the database.
+
+        The exception need not be an exception produced by the driver.
+        """
+
 class IDBDriverSupportsCritical(IDBDriver):
     """
     A marker for database drivers that support
@@ -1526,6 +1534,9 @@ class IRelStorageAdapter(Interface):
         deadlock detection, and starting with MySQL 8, it supports
         ``NOWAIT``.
 
+        In both implementations, though, deadlocks lead to annoying
+        database server error logs, so they should be avoided.
+
         .. rubric:: Lock Order
 
         The original strategy was to first take exclusive locks of
@@ -1620,6 +1631,26 @@ class IRelStorageAdapter(Interface):
         immediately able to determine that 2 has been modified and
         quickly raise an exception without holding any other locks.
 
+        However, this does introduce a problem of its own: The deadlocks
+        we talked about above are common in this scenario. While that's
+        fine in-and-of-itself, it does mean that we're possibly missing out
+        on the chance to catch and resolve conflicts (because the deadlock
+        errors immediately abort the transaction). Since most databases
+        support NOWAI or a good approximation of it, we can avoid the deadlocks
+        by taking the exclusive locks first, and then taking share locks NOWAIT
+        (taking the share lock NOWAIT will immediately abort if some other transaction
+        is already holding an exclusive lock; the reverse is not true).
+
+        But what about fast notification of transactions that
+        are going to have to abort anyway? For databases that implement all of this
+        in a single step in the database, we can first do a no-lock check
+        of ``readCurrent`` items, and if anything has changed, we can
+        bail immediately. It's only in the case that some other transaction is
+        actually modifying an object that we want to ``readCurrent`` on, *and*
+        some other transaction is modifying an object that we also want to modify
+        (so we have to wait on an exclusive lock) that we wind up waiting
+        longer than we did before to abort a doomed transaction.
+
         :param cursor: The store cursor.
         :param read_current_oids: A mapping from oid integer to tid
             integer that the transaction expects.
@@ -1646,6 +1677,12 @@ class UnableToAcquireCommitLockError(StorageError, UnableToAcquireLockError):
     However, for historical reasons, this exception is not a ``TransientError``.
     """
 
+
+class UnableToLockRowsDeadlockError(ConflictError, UnableToAcquireLockError):
+    """
+    The root class for a lock error because there was a deadlock.
+    """
+
 # TransientError -> ConflictError -> ReadConflictError
 
 class UnableToLockRowsToModifyError(ConflictError, UnableToAcquireLockError):
@@ -1660,6 +1697,12 @@ class UnableToLockRowsToModifyError(ConflictError, UnableToAcquireLockError):
     This is a type of ``ConflictError``, which is a transient error.
     """
 
+class UnableToLockRowsToModifyDeadlockError(UnableToLockRowsToModifyError,
+                                            UnableToLockRowsDeadlockError):
+    pass
+
+UnableToLockRowsToModifyError.DEADLOCK_VARIANT = UnableToLockRowsToModifyDeadlockError
+
 class UnableToLockRowsToReadCurrentError(ReadConflictError, UnableToAcquireLockError):
     """
     We were unable to lock one or more rows that belong to an object
@@ -1671,6 +1714,12 @@ class UnableToLockRowsToReadCurrentError(ReadConflictError, UnableToAcquireLockE
 
     This is a type of ``ReadConflictError``, which is a transient error.
     """
+
+class UnableToLockRowsToReadCurrentDeadlockError(UnableToLockRowsToReadCurrentError,
+                                                 UnableToLockRowsDeadlockError):
+    pass
+
+UnableToLockRowsToReadCurrentError.DEADLOCK_VARIANT = UnableToLockRowsToReadCurrentDeadlockError
 
 class UnableToAcquirePackUndoLockError(StorageError, UnableToAcquireLockError):
     """A pack or undo operation is in progress."""

@@ -244,3 +244,6 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         if conn.readonly:
             return False
         return conn.in_transaction
+
+    def _get_exception_pgcode(self, exc):
+        return exc.args[0]['C']

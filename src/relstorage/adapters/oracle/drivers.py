@@ -19,6 +19,7 @@ Oracle IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import warnings
 
 from zope.interface import implementer
 
@@ -59,6 +60,9 @@ class cx_OracleDriver(AbstractModuleDriver):
         self.BINARY = cx_Oracle.BINARY
         self.STRING = cx_Oracle.STRING
         self.version = cx_Oracle.version
+
+    def exception_is_deadlock(self, exc):
+        warnings.warn("exception_is_deadlock() unimplemented for cx_Oracle")
 
 
 implement_db_driver_options(

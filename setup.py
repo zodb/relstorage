@@ -260,9 +260,9 @@ setup(
             # get Windows.
             'pg8000 >= 1.11.0 ; python_version == "2.7" or platform_python_implementation == "PyPy"',
             # CFFI, runs on all implementations.
-            # We get coverage from 3.5 on Travis and verification it works on Windows from Travis.
+            # We get coverage from 3.x on Travis and verification it works on Windows from Travis.
             # We get 2.7 testing from PyPy on Travis.
-            'psycopg2cffi >= 2.7.4; python_version == "3.5" or platform_python_implementation == "PyPy"',
+            'psycopg2cffi >= 2.7.4; python_version == "3.6" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
             'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
         ],

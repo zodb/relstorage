@@ -64,6 +64,8 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         if self.Binary is str:
             self.Binary = bytearray
 
+        self.mysql_deadlock_exc = self.driver_module.DatabaseError
+
         if PYPY:
             # Patch to work around JIT bug found in (at least) 7.1.1
             # https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh
@@ -211,6 +213,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     def callproc_no_result(self, cursor, proc, args=()):
         # Again, weird. The call's empty result set seems to be consumed.
         cursor.execute("CALL " + proc, args)
+
 
 class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name

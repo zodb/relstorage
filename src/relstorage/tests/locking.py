@@ -173,8 +173,9 @@ class TestLocking(TestCase):
         txb = None
         before = time.time()
         if exception_in_b:
-            with self.assertRaises(exception_in_b):
+            with self.assertRaises(exception_in_b) as exc:
                 lock_b()
+            self.assertExceptionNotCausedByDeadlock(exc.exception, self._storage)
         else:
             txb = lock_b()
         after = time.time()
@@ -252,9 +253,9 @@ class TestLocking(TestCase):
         txa = self.__read_current_and_lock(storageA, None, obj1_oid, new_tid)
 
         # Prove that it's locked. (This is slow on MySQL 5.7)
-        with self.assertRaises(UnableToLockRowsToModifyError):
+        with self.assertRaises(UnableToLockRowsToModifyError) as exc:
             self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
-
+        self.assertExceptionNotCausedByDeadlock(exc.exception, storageC)
         # Now, try to readCurrent of object2 in the old tid, and take an exclusive lock
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
@@ -262,38 +263,37 @@ class TestLocking(TestCase):
             self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
         # Which is still held because we cannot lock it.
-        with self.assertRaises(UnableToLockRowsToModifyError):
+        with self.assertRaises(UnableToLockRowsToModifyError) as exc:
             self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
-
+        self.assertExceptionNotCausedByDeadlock(exc.exception, storageC)
         storageA.tpc_abort(txa)
 
     @skipIfNoConcurrentWriters
     @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
-        # Starting with two objects 1 and 2, if transaction A modifies 1 and
-        # does readCurrent of 2, up through the voting phase, and transaction B does
-        # exactly the opposite, transaction B is immediately killed with a read conflict
-        # error. (We use the same two objects instead of a new object in transaction B to prove
-        # shared locks are taken first.)
-        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        # Relstorage 3, prior to relstorage 3.5: Starting with two
+        # objects 1 and 2, if transaction A modifies 1 and does
+        # readCurrent of 2, up through the voting phase, and
+        # transaction B does exactly the opposite, transaction B is
+        # immediately killed with a read conflict error
+        # (``UnableToLockRowsToReadCurrentError``) (We use the same
+        # two objects instead of a new object in transaction B to
+        # prove shared locks are taken first.)
+        #
+        # In Relstorage 3.5, the order is reversed (the 'first' in the
+        # name is no longer accurate) and transaction B waits on
+        # transaction A to finish and we should get
+        # ``UnableToLockRowsToModifyError``
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
         commit_lock_timeout = self.__tiny_commit_time
-        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToLockRowsToReadCurrentError,
+        _duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToLockRowsToModifyError,
             commit_lock_timeout=commit_lock_timeout,
         )
-        # The NOWAIT lock should be very quick to fire.
+        # The NOWAIT lock should be very quick to fire...but we don't actually hit that case
+        # first, we hit the commit_lock_timeout first. Usually.
         assert self._storage._adapter.locker.supports_row_lock_nowait is not None
-        if self._storage._adapter.locker.supports_row_lock_nowait:
-            multiplier = 1.5
-            if RUNNING_ON_CI:
-                # Give some extra time on CI since the resources are shared
-                # and often extremely limited.
-                multiplier = 2.1
-            self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
-        else:
-            # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
-            self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
-
+        #self.assertGreaterEqual(duration_blocking, commit_lock_timeout)
 
     def __lock_rows_being_modified_only(self, storage, cursor,
                                         _current_oids, _share_blocks,
@@ -323,8 +323,9 @@ class TestLocking(TestCase):
         # its exclusive locks to let txB take *its* exclusive locks.
         # Then txB can go for the shared locks, which will block if
         # we're not in ``NOWAIT`` mode for shared locks. This tests
-        # that we don't block, we report a retryable error. Note that
-        # we don't adjust the commit_lock_timeout; it doesn't apply.
+        # we report a retryable error.
+        #
+        # We don't adjust the commit_lock_timeout; it doesn't apply.
         #
         # If we're using a stored procedure, this test will break
         # because we won't be able to force the interleaving, so we make it
@@ -342,10 +343,11 @@ class TestLocking(TestCase):
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToReadCurrentError,
             storageA=storageA,
-            copy_interleave=()
+            copy_interleave=(),
         )
 
         self.__assert_small_blocking_duration(storageA, duration_blocking)
+
 
     @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrentDeadlock(self):
@@ -478,3 +480,151 @@ class TestLocking(TestCase):
         # This is an anti-pattern. we really should subclass the tests
         # in our testoracle.py file.
         return self._storage._adapter.schema.database_type == 'oracle'
+
+    @skipIfNoConcurrentWriters
+    def checkTL_manualInterleavedConflictingReadCurrentDeadlock(self):
+        #
+        # This is like ``checkTL_InterleavedConflictingReadCurrentDeadlock``,
+        # but we manually interleave using a third connection, so we can
+        # use the stored procs.
+        #
+        # Prior to RelStorage 3.5, this was the sequence:
+        # Three objects, 0, 1, 2.
+        # Thee connections: A, B, C.
+        # (1) Connection A takes a shared lock on object 0, 1, and 2.
+        #     Object 0 is used as as stop point to control the other transactions.
+        #
+        # (2) Connection B begins the regular commit sequence:
+        #     shared lock on object 1, exclusive lock on object 0 and 2.
+        #     It will be prevented from getting this by Connection A, and block.
+        #
+        # (3) Connection C begins the regular commit sequence:
+        #     shared lock on object 2 (which it should get),
+        #     exclusive lock on object 0 and 1. This is held by both A and B.
+        #
+        # (4) Connection A aborts, releasing its shared locks.
+        #     Connection B is free to move forward and try to take the lock on
+        #     2; it is prevented by Connection C.
+        #     Connection C, meanwhile is prevented from getting the exclusive lock
+        #     on object 1 by the shared locke held by connection B. B and C
+        #     are deadlocked. One of B or C dies with a deadlock error "instantly".
+        #
+        # This happened because shared NOWAIT locks were always taken
+        # before exclusive locks. The problem is that the deadlock
+        # error forced a transaction retry and prevented conflict
+        # resolution. So we reverse the order and rely on NOWAIT to prevent
+        # deadlocks. (We try to mitigate time spent
+        # waiting to take exclusive locks by running a quick check for
+        # readCurrent errors first). If there are no readCurrent
+        # errors, we have a chance to fix any conflicts.
+        #
+        # pylint:disable=too-many-locals,too-many-statements
+        from relstorage.adapters.interfaces import UnableToAcquireLockError
+
+        store_conn_pool = self._storage._store_connection_pool
+        self.assertEqual(store_conn_pool.instance_count, 1)
+
+        storageB = self._closing(self._storage.new_instance())
+        storageC = self._closing(self._storage.new_instance())
+        storageB.last_error = storageC.last_error = None
+
+        self.assertEqual(store_conn_pool.instance_count, 3)
+
+        db = self._closing(DB(self._storage, pool_size=1))
+        conn = db.open()
+        root = conn.root()
+        root['object1'] = MinPO('object1')
+        root['object2'] = MinPO('object2')
+        transaction.commit()
+
+        obj0_oid = root._p_oid
+        obj1_oid = root['object1']._p_oid
+        obj2_oid = root['object2']._p_oid
+        prev_tid = root._p_serial
+
+        txa = TransactionMetaData()
+        txb = TransactionMetaData()
+        txc = TransactionMetaData()
+        self._storage.tpc_begin(txa)
+        storageB.tpc_begin(txb)
+        storageC.tpc_begin(txc)
+
+        # (1)
+        for oid in obj0_oid, obj1_oid, obj2_oid:
+            self._storage.checkCurrentSerialInTransaction(oid, prev_tid, txa)
+        self._storage.tpc_vote(txa)
+
+        # (2a)
+        storageB.checkCurrentSerialInTransaction(obj1_oid, prev_tid, txb)
+        storageB.store(obj0_oid, prev_tid, b'bad pickle', '', txb)
+        storageB.store(obj2_oid, prev_tid, b'bad pickle', '', txb)
+
+        # The voting has to be in a thread because it blocks
+        cond = threading.Condition()
+        cond.storage_finished = None
+        def do_vote(storage, tx):
+            cond.acquire(5)
+            cond.notifyAll()
+            cond.release()
+            try:
+                storage.tpc_vote(tx)
+            except UnableToAcquireLockError as ex:
+                storage.last_error = ex
+            finally:
+                cond.storage_finished = storage, tx
+                cond.acquire(5)
+                cond.notifyAll()
+                cond.release()
+
+        thread_locking_b = threading.Thread(
+            target=do_vote,
+            args=(storageB, txb),
+            name='thread_locking_b',
+        )
+
+        # (3a)
+        storageC.checkCurrentSerialInTransaction(obj2_oid, prev_tid, txc)
+        storageC.store(obj0_oid, prev_tid, b'bad pickle', '', txc)
+        storageC.store(obj1_oid, prev_tid, b'bad pickle', '', txc)
+        thread_locking_c = threading.Thread(
+            target=do_vote,
+            args=(storageC, txc),
+            name='thread_locking_c',
+        )
+
+        # (2b)
+        cond.acquire(5)
+        thread_locking_b.start()
+        cond.wait(5)
+        cond.release()
+
+        # (2b)
+        cond.acquire(5)
+        thread_locking_c.start()
+        cond.wait(5)
+        cond.release()
+
+        # (4)
+        # Release the locks and let the other connections proceed.
+        # Sleep for a bit to be sure they've had a chance to send off
+        # their queries
+        time.sleep(0.2)
+        self._storage.tpc_abort(txa)
+
+        # Wait for at least one of them to finish...
+        cond.acquire(5)
+        cond.wait(5)
+        cond.release()
+        # then abort it, releasing the other storage to finish.
+        cond.storage_finished[0].tpc_abort(cond.storage_finished[1])
+
+        cond.acquire(5)
+        cond.wait(5)
+        cond.release()
+
+        thread_locking_b.join(1)
+        thread_locking_c.join(1)
+
+        # Neither one produced an error
+        self.assertIsNone(storageB.last_error)
+        self.assertIsNone(storageC.last_error)

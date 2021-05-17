@@ -18,8 +18,8 @@ label_proc:BEGIN
        -- For 'lock_timeout' (1205) or deadlock errors (1213), restore the old timeout
        -- (if it was a shared lock that failed),
        -- completely rollback the transaction to drop any locks we do have,
-       -- (important if we had already taken shared locks then timed out on
-       -- exclusive locks.)
+       -- (important if we had already taken exclusive locks then failed
+       -- on shared locks.)
        -- and then reraise the exception.
        SET SESSION innodb_lock_wait_timeout = prev_timeout;
        -- The server depends on these error messages.
@@ -33,6 +33,8 @@ label_proc:BEGIN
        ROLLBACK;
        RESIGNAL SET MESSAGE_TEXT = @msg;
      END;
+
+  -- See the PostgreSQL procedures for generic comments.
 
   -- We have to force the server to materialize the results, otherwise
   -- not all rows actually get locked. Also, it is critically
@@ -80,6 +82,40 @@ label_proc:BEGIN
       SET i = i + 1;
     END WHILE;
 
+
+    -- Now return any such rows that we locked
+    -- that are in conflict.
+    -- No point doing any more work taking exclusive locks, etc,
+    -- because we will immediately abort, but we must be careful not to return
+    -- an extra result set that's empty: that intereferes with our socket IO
+    -- waiting for query results.
+    SELECT zoid, {CURRENT_OBJECT}.tid
+    INTO con_oid, con_tid
+    FROM {CURRENT_OBJECT}
+    INNER JOIN temp_read_current USING (zoid)
+    WHERE temp_read_current.tid <> {CURRENT_OBJECT}.tid
+    LIMIT 1;
+
+    IF con_oid IS NOT NULL THEN
+      SELECT con_oid, con_tid, NULL as prev_tid, NULL as state;
+      ROLLBACK; -- release locks.
+      LEAVE label_proc; -- return
+    END IF;
+
+  END IF;
+
+
+  INSERT INTO temp_locked_zoid
+  SELECT o.zoid
+  FROM {CURRENT_OBJECT} o FORCE INDEX (PRIMARY)
+  INNER JOIN temp_store t FORCE INDEX (PRIMARY)
+      ON o.zoid = t.zoid
+  WHERE t.prev_tid <> 0
+  ORDER BY t.zoid
+  FOR UPDATE;
+
+  IF read_current_oids_tids IS NOT NULL THEN
+
     -- The timeout only goes to 1; this procedure seems to always take roughtly 2s
     -- to actually detect a lock timeout problem, however.
     -- TODO: Can we apply the MAX_EXECUTION_TIME() optimizer hint?
@@ -122,17 +158,6 @@ label_proc:BEGIN
     END IF;
 
   END IF;
-
-  DELETE FROM temp_locked_zoid;
-
-  INSERT INTO temp_locked_zoid
-  SELECT o.zoid
-  FROM {CURRENT_OBJECT} o FORCE INDEX (PRIMARY)
-  INNER JOIN temp_store t FORCE INDEX (PRIMARY)
-      ON o.zoid = t.zoid
-  WHERE t.prev_tid <> 0
-  ORDER BY t.zoid
-  FOR UPDATE;
 
   SELECT cur.zoid, cur.tid, temp_store.prev_tid, {OBJECT_STATE_NAME}.state
   FROM {CURRENT_OBJECT} cur
