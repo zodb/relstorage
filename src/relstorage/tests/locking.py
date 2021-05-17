@@ -271,23 +271,23 @@ class TestLocking(TestCase):
     @skipIfNoConcurrentWriters
     @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
-        # Relstorage 3, prior to relstorage 3.5:
-        # Starting with two objects 1 and 2, if transaction A modifies 1 and
-        # does readCurrent of 2, up through the voting phase, and transaction B does
-        # exactly the opposite, transaction B is immediately killed with a read conflict
-        # error. (We use the same two objects instead of a new object in transaction B to prove
-        # shared locks are taken first.)
+        # Relstorage 3, prior to relstorage 3.5: Starting with two
+        # objects 1 and 2, if transaction A modifies 1 and does
+        # readCurrent of 2, up through the voting phase, and
+        # transaction B does exactly the opposite, transaction B is
+        # immediately killed with a read conflict error
+        # (``UnableToLockRowsToReadCurrentError``) (We use the same
+        # two objects instead of a new object in transaction B to
+        # prove shared locks are taken first.)
         #
         # In Relstorage 3.5, the order is reversed (the 'first' in the
         # name is no longer accurate) and transaction B waits on
-        # transaction A to finish and we *should* get
-        # ``UnableToLockRowsToModifyError``; However, this is all very
-        # timing sensitive, and the test is not fully reliable, beyond generating a
-        # ``UnableToAcquireLockError``
-        from relstorage.adapters.interfaces import UnableToAcquireLockError
+        # transaction A to finish and we should get
+        # ``UnableToLockRowsToModifyError``
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
         commit_lock_timeout = self.__tiny_commit_time
         _duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToAcquireLockError,
+            UnableToLockRowsToModifyError,
             commit_lock_timeout=commit_lock_timeout,
         )
         # The NOWAIT lock should be very quick to fire...but we don't actually hit that case
@@ -331,7 +331,7 @@ class TestLocking(TestCase):
         # because we won't be able to force the interleaving, so we make it
         # use the old version.
 
-        from relstorage.adapters.interfaces import UnableToAcquireLockError
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
         storageA = self._closing(self._storage.new_instance())
         # This turns off stored procs and lets us control that phase.
         storageA._adapter.force_lock_objects_and_detect_conflicts_interleavable = True
@@ -341,7 +341,7 @@ class TestLocking(TestCase):
             storageA)
 
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToAcquireLockError,
+            UnableToLockRowsToReadCurrentError,
             storageA=storageA,
             copy_interleave=(),
         )
