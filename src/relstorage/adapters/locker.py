@@ -35,6 +35,7 @@ from .schema import Schema
 from .interfaces import UnableToAcquireCommitLockError
 from .interfaces import UnableToLockRowsToModifyError
 from .interfaces import UnableToLockRowsToReadCurrentError
+from .interfaces import UnableToLockRowsDeadlockError
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -184,16 +185,19 @@ class AbstractLocker(DatabaseHelpersMixin,
 
         # Lock order is explained in IRelStorageAdapter.lock_objects_and_detect_conflicts.
 
-        # First lock rows we need shared access to, typically without blocking.
+        after_lock_share() # Call once for a quick check
+
+        # Lock the rows we need exclusive access to.
+        # This will block for up to ``commit_lock_timeout``,
+        # possibly * N
+        self._lock_rows_being_modified(cursor)
+
+        # Next lock rows we need shared access to, typically without blocking.
         if read_current_oid_ints:
             self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
                                                   shared_locks_block)
-            after_lock_share()
+            after_lock_share() # call again to verify
 
-
-        # Then lock the rows we need exclusive access to.
-        # This will block for up to ``commit_lock_timeout``.
-        self._lock_rows_being_modified(cursor)
 
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         _, table = self._get_current_objects_query
@@ -242,21 +246,32 @@ class AbstractLocker(DatabaseHelpersMixin,
                 UnableToLockRowsToModifyError
             )
 
+    def _modify_commit_lock_kind(self, kind, exc): # pylint:disable=unused-argument
+        return kind
+
     def reraise_commit_lock_error(self, cursor, lock_stmt, kind):
+        v = sys.exc_info()[1]
+        kind = self._modify_commit_lock_kind(kind, v)
+        if self.driver.exception_is_deadlock(v):
+            kind = getattr(kind, 'DEADLOCK_VARIANT', UnableToLockRowsDeadlockError)
+
         try:
             debug_info = self._get_commit_lock_debug_info(cursor, True)
         except Exception as nested: # pylint:disable=broad-except
             logger.exception("Failed to get lock debug info")
             debug_info = "%r(%r)" % (type(nested), nested)
+
         __traceback_info__ = lock_stmt, debug_info
         if debug_info:
             logger.debug("Failed to acquire commit lock:\n%s", debug_info)
+
         message = "Acquiring a lock during commit failed: %s%s" % (
             sys.exc_info()[1],
             '\n' + debug_info if debug_info else '(No debug info.)'
         )
         val = kind(message)
-        val.__relstorage_cause__ = sys.exc_info()[1]
+        val.__relstorage_cause__ = v
+        del v
         six.reraise(
             kind,
             val,

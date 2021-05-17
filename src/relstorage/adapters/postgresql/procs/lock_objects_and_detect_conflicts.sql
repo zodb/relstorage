@@ -127,6 +127,8 @@ BEGIN
       SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
       FROM locked WHERE locked.tid <> locked.desired
       LIMIT 1;
+    -- If that failed to get a lock because it is being modified by another transaction,
+    -- it raised an exception.
     IF FOUND THEN
       -- We're holding exclusive locks here, so abort the transaction
       -- and release them; don't wait for Python to do it.

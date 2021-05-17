@@ -20,6 +20,8 @@ from __future__ import absolute_import
 from zope.interface import implementer
 
 from ..interfaces import ILocker
+from ..interfaces import UnableToLockRowsToModifyError
+from ..interfaces import UnableToLockRowsToReadCurrentError
 from ..interfaces import UnableToAcquirePackUndoLockError
 from ..locker import AbstractLocker
 
@@ -49,6 +51,20 @@ class PostgreSQLLocker(AbstractLocker):
     def release_commit_lock(self, cursor):
         # no action needed, locks released with transaction.
         pass
+
+    def _modify_commit_lock_kind(self, kind, exc):
+        # We can distinguish exclusive locks from shared locks
+        # by the error message produced by postgresql. The exclusive lock
+        # failures have a full query ('SELECT ... FOR UPDATE'), while
+        # the shared locks either have 'RETURN QUERY' in their string
+        # (when we couldn't get a lock specifically) or 'readCurrent' in their
+        # hint (when we could get a lock, but the object changed)
+        exc_str = str(exc).lower()
+        if 'for update' in exc_str:
+            kind = UnableToLockRowsToModifyError
+        elif 'return query' in exc_str or 'readCurrent' in exc_str:
+            kind = UnableToLockRowsToReadCurrentError
+        return kind
 
     def _get_commit_lock_debug_info(self, cursor, was_failure=False):
         # When we're called, the transaction is guaranteed to be

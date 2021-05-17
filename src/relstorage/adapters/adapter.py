@@ -217,6 +217,7 @@ class AbstractAdapter(DatabaseHelpersMixin):
             # We go ahead and compare the readCurrent TIDs here, so
             # that we don't have to make the call to detect conflicts
             # or even lock rows if there are readCurrent violations.
+            # Recall this function is called twice.
             for oid_int, expect_tid_int in read_current_oids.items():
                 actual_tid_int = current.get(oid_int, 0)
                 if actual_tid_int != expect_tid_int:
@@ -225,13 +226,11 @@ class AbstractAdapter(DatabaseHelpersMixin):
                         serials=(int64_to_8bytes(actual_tid_int),
                                  int64_to_8bytes(expect_tid_int)))
 
-        conflicts = self.mover.detect_conflict(cursor)
-
         self.locker.lock_current_objects(
             cursor, read_current_oid_ints,
             self.force_lock_readCurrent_for_share_blocking,
             after_lock_share)
-
+        conflicts = self.mover.detect_conflict(cursor)
         return conflicts
 
     #: Subclasses that have the ability to implement
