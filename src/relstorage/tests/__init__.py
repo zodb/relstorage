@@ -423,6 +423,9 @@ class MockDriver(object):
         if cursor is not None:
             cursor.fetchall()
 
+    def exception_is_deadlock(self, exc):
+        return None
+
 class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}

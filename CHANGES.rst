@@ -33,7 +33,7 @@
   entire transaction, and which transaction got killed was unknowable.
   Provisions are made to keep fast detection of ``readCurrent``
   conflicts. Benchmarks with zodbshootout find no substantial
-  differences.
+  differences. See :issue:`469`.
 
 3.4.5 (2021-04-23)
 ==================
