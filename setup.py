@@ -232,7 +232,7 @@ setup(
         'memcache': memcache_require,
         'test': tests_require,
         'docs': [
-            'sphinx',
+            'sphinx < 4', # 4+ is currently incompatible with repoze.sphinx.autointerface
             'sphinxcontrib-programoutput',
             'repoze.sphinx.autointerface',
             'sphinx_rtd_theme',
