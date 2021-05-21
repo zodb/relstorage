@@ -5,7 +5,9 @@
 3.5.0a2 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Revert :issue:`469` and return to taking shared locks before
+  exclusive locks. Testing in a large, busy application indicated that
+  performance was overall slightly worse this way.
 
 
 3.5.0a1 (2021-05-17)

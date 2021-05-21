@@ -9,48 +9,100 @@ BEGIN
 
   -- Order matters here.
   --
-  -- We want to first take exclusive locks for the modified objects
-  -- (and wait if needed) and then take NOWAIT shared locks for the
-  -- readCurrent objects.
+  -- We've tried it both ways: Shared locks and then exclusive locks,
+  -- or exclusive locks and then shared locks.
   --
-  -- If we do it the other way around (RelStorage < 3.5), we can
-  -- *easily* deadlock in lock order on the server, which would result
-  -- in us raising ``UnableToLockRows...`` exception, which
-  -- immediately aborts the transaction and doesn't allow for any
-  -- conflict resolution.
+  -- The shared-then-exclusive can fairly easily deadlock; this gets
+  -- detected by PostgreSQL which kills one of the transactions to
+  -- resolve the situation. How long it takes to find the deadlock is
+  -- configurable (up to 1s by default, but typically it happens much
+  -- faster because each involved PostgrSQL worker is checking in a
+  -- slightly different schedule). Busy servers are sometimes
+  -- configured to check less frequently, though. The killed transaction
+  -- results in an unresolvable conflict and has to be retried. (There was
+  -- going to be a conflict anyway, almost certainly a ReadConflictError,
+  -- which is also unresolvable).
   --
-  -- However, taking exclusive first and only then shared NOWAIT
-  -- doesn't deadlock (I think), certainly not as easily. This means a
-  -- transaction might have to wait, or timeout, but if it gets
-  -- through, it has a chance to resolve conflicts and commit.
+  -- The other way, exclusive-then-shared, eliminates the deadlocks.
+  -- However, in tests of a busy system, taking the exclusive locks
+  -- first and then raising a ReadConflictError from the shared locks,
+  -- actually made performance overall *worse*. The theory is that we
+  -- spent more time waiting for locks we weren't going to be able to
+  -- use anyway.
   --
-  -- One of the appealing properties of taking the shared first,
-  -- though, is that if we *are* doomed to failure (because of a
-  -- ReadCurrent error), we can know it immediately. We can still make
-  -- that check before we try to wait for exclusive locks, but since
-  -- we can't actually lock those rows yet, we need to perform the
-  -- check *again*, after taking the exclusive locks (and this time
-  -- lock them to be sure they don't change).
+  -- Thus, take shared locks first.
 
-  -- lock in share should NOWAIT
   IF read_current_oids IS NOT NULL THEN
-    -- A pre-check: If we can detect a single readCurrent conflict,
-    -- do so, send it to the server where it will raise VoteConflictError,
-    -- and just bail. We could make this raise an exception and abort the
-    -- transaction, but we're not holding any locks here, and the error message
-    -- from VoteConflictError is more informative.
+    -- XXX: SELECT FOR SHARE does disk I/O! This can become expensive
+    -- and possibly lead to database issues.
+    -- See https://buttondown.email/nelhage/archive/22ab771c-25b4-4cd9-b316-31a86f737acc
+    -- We document this in docs/postgresql/index.rst
+    --
+    -- Because of that, and because there are ZODB tests that expect
+    -- to get a ReadConflictError with an OID and TID in it
+    -- (check_checkCurrentSerialInTransaction), we first run a check
+    -- to see if there is definitely an issue. If there is, we just
+    -- return. Only if we can't be sure do we go on and take out
+    -- shared locks. We need to do this because if the shared locks detect a
+    -- conflict, we want to immediately release those locks, and the only way to
+    -- do that in PostgreSQL is to raise an exception (unlike MySQL we can't
+    -- ROLLBACK the transaction).
     RETURN QUERY -- This just adds to the result table; a final bare ``RETURN`` actually ends execution
-      SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, NULL::BIGINT, NULL::BYTEA
-      FROM {CURRENT_OBJECT}
-      INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
-          USING (zoid)
-      WHERE {CURRENT_OBJECT}.tid <> t.tid
-      LIMIT 1;
+    SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, NULL::BIGINT, NULL::BYTEA
+    FROM {CURRENT_OBJECT}
+    INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
+      USING (zoid)
+    WHERE {CURRENT_OBJECT}.tid <> t.tid
+    LIMIT 1;
+
     IF FOUND THEN
       RETURN;
     END IF;
-  END IF;
 
+
+    -- Doing this in a single query takes some effort to make sure
+    -- that the required rows all get locked. The optimizer is smart
+    -- enough to push a <> condition from an outer query into a
+    -- subquery. It is *not* smart enough to do the same with a CTE...
+    -- ...prior to PG12. In PG12, CTEs can be inlined, and if it was,
+    -- the same optimizer error would arise.
+    --
+    -- Fortunately, in PG12, "CTEs are automatically inlined if they
+    -- have no side-effects, are not recursive, and are referenced
+    -- only once in the query." The ``FOR SHARE`` clause counts as a
+    -- side-effect, and so the CTE Is not inlined.
+
+    -- Should this ever change, we could force the issue by using
+    -- 'WITH ... AS MATERIALIZED' but that's not valid syntax before
+    -- 12. (It also says recursive CTEs are not inlined, and that *is*
+    -- valid on older versions, but this isn't actually a recursive
+    -- query, even if we use that keyword, and I don't know if the
+    -- keyword alone would be enough to fool it (the plan doesn't
+    -- change on 11 when we use the keyword)).
+
+    RETURN QUERY
+      WITH locked AS (
+        SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
+        FROM {CURRENT_OBJECT}
+        INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
+          USING (zoid)
+        ORDER BY zoid
+        FOR SHARE NOWAIT
+      )
+      SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
+      FROM locked WHERE locked.tid <> locked.desired
+      LIMIT 1;
+    -- If that failed to get a lock because it is being modified by another transaction,
+    -- it raised an exception.
+    IF FOUND THEN
+      -- We're holding shared locks here, so abort the transaction
+      -- and release them; don't wait for Python to do it.
+      -- Unfortunately, this means we lose the ability to report exactly the
+      -- object that conflicted.
+      RAISE EXCEPTION USING ERRCODE = 'lock_not_available',
+            HINT = 'readCurrent';
+    END IF;
+  END IF;
 
   -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
   -- side effects to lock the rows.
@@ -88,54 +140,6 @@ BEGIN
   WHERE temp_store.prev_tid <> 0
   ORDER BY {CURRENT_OBJECT}.zoid
   FOR UPDATE OF {CURRENT_OBJECT};
-
-  IF read_current_oids IS NOT NULL THEN
-
-    -- Doing this in a single query takes some effort to make sure
-    -- that the required rows all get locked. The optimizer is smart
-    -- enough to push a <> condition from an outer query into a
-    -- subquery. It is *not* smart enough to do the same with a CTE...
-    -- ...prior to PG12. In PG12, CTEs can be inlined, and if it was,
-    -- the same optimizer error would arise.
-    --
-    -- Fortunately, in PG12, "CTEs are automatically inlined if they
-    -- have no side-effects, are not recursive, and are referenced
-    -- only once in the query." The ``FOR SHARE`` clause counts as a
-    -- side-effect, and so the CTE Is not inlined.
-
-    -- Should this ever change, we could force the issue by using
-    -- 'WITH ... AS MATERIALIZED' but that's not valid syntax before
-    -- 12. (It also says recursive CTEs are not inlined, and that *is*
-    -- valid on older versions, but this isn't actually a recursive
-    -- query, even if we use that keyword, and I don't know if the
-    -- keyword alone would be enough to fool it (the plan doesn't
-    -- change on 11 when we use the keyword)).
-
-    -- XXX: SELECT FOR SHARE does disk I/O! This can become expensive
-    -- and possibly lead to database issues.
-    -- See https://buttondown.email/nelhage/archive/22ab771c-25b4-4cd9-b316-31a86f737acc
-    -- We document this in docs/postgresql/index.rst
-    RETURN QUERY -- This just adds to the result table; a final bare ``RETURN`` actually ends execution
-      WITH locked AS (
-        SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
-        FROM {CURRENT_OBJECT}
-        INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
-          USING (zoid)
-        ORDER BY zoid
-        FOR SHARE NOWAIT
-      )
-      SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
-      FROM locked WHERE locked.tid <> locked.desired
-      LIMIT 1;
-    -- If that failed to get a lock because it is being modified by another transaction,
-    -- it raised an exception.
-    IF FOUND THEN
-      -- We're holding exclusive locks here, so abort the transaction
-      -- and release them; don't wait for Python to do it.
-      RAISE EXCEPTION USING ERRCODE = 'lock_not_available'
-            HINT = 'readCurrent';
-    END IF;
-  END IF;
 
 
   RETURN QUERY
