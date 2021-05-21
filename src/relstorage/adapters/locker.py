@@ -183,21 +183,16 @@ class AbstractLocker(DatabaseHelpersMixin,
         # locked when they are returned by the cursor, so we must
         # consume all the rows.
 
-        # Lock order is explained in IRelStorageAdapter.lock_objects_and_detect_conflicts.
-
-        after_lock_share() # Call once for a quick check
+        # Lock rows we need shared access to, typically without blocking.
+        if read_current_oid_ints:
+            self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
+                                                  shared_locks_block)
+            after_lock_share()
 
         # Lock the rows we need exclusive access to.
         # This will block for up to ``commit_lock_timeout``,
         # possibly * N
         self._lock_rows_being_modified(cursor)
-
-        # Next lock rows we need shared access to, typically without blocking.
-        if read_current_oid_ints:
-            self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
-                                                  shared_locks_block)
-            after_lock_share() # call again to verify
-
 
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         _, table = self._get_current_objects_query

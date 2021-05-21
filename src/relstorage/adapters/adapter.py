@@ -217,7 +217,6 @@ class AbstractAdapter(DatabaseHelpersMixin):
             # We go ahead and compare the readCurrent TIDs here, so
             # that we don't have to make the call to detect conflicts
             # or even lock rows if there are readCurrent violations.
-            # Recall this function is called twice.
             for oid_int, expect_tid_int in read_current_oids.items():
                 actual_tid_int = current.get(oid_int, 0)
                 if actual_tid_int != expect_tid_int:

@@ -62,7 +62,7 @@ class PostgreSQLLocker(AbstractLocker):
         exc_str = str(exc).lower()
         if 'for update' in exc_str:
             kind = UnableToLockRowsToModifyError
-        elif 'return query' in exc_str or 'readCurrent' in exc_str:
+        elif 'return query' in exc_str or 'readcurrent' in exc_str:
             kind = UnableToLockRowsToReadCurrentError
         return kind
 

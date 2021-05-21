@@ -46,6 +46,7 @@ def WithAndWithoutInterleaving(func):
         if not adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
             adapter.force_lock_objects_and_detect_conflicts_interleavable = True
 
+        self.testing_interleaved = True
         func(self)
         if 'force_lock_objects_and_detect_conflicts_interleavable' in adapter.__dict__:
             del adapter.force_lock_objects_and_detect_conflicts_interleavable
@@ -55,6 +56,7 @@ def WithAndWithoutInterleaving(func):
         if adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
             # No stored proc version.
             return
+        self.testing_interleaved = False
         func(self)
 
     def test(self):
@@ -70,6 +72,8 @@ class TestLocking(TestCase):
     # pylint:disable=abstract-method
 
     _storage = None
+
+    testing_interleaved = False
 
     def make_storage(self, *args, **kwargs):
         raise NotImplementedError
@@ -259,7 +263,7 @@ class TestLocking(TestCase):
         # Now, try to readCurrent of object2 in the old tid, and take an exclusive lock
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
-        with self.assertRaisesRegex(VoteReadConflictError, "serial this txn started"):
+        with self.assertRaises(VoteReadConflictError):
             self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
         # Which is still held because we cannot lock it.
@@ -271,23 +275,17 @@ class TestLocking(TestCase):
     @skipIfNoConcurrentWriters
     @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
-        # Relstorage 3, prior to relstorage 3.5: Starting with two
-        # objects 1 and 2, if transaction A modifies 1 and does
-        # readCurrent of 2, up through the voting phase, and
-        # transaction B does exactly the opposite, transaction B is
-        # immediately killed with a read conflict error
+        # Starting with two objects 1 and 2, if transaction A modifies
+        # 1 and does readCurrent of 2, up through the voting phase,
+        # and transaction B does exactly the opposite, transaction B
+        # is immediately killed with a read conflict error
         # (``UnableToLockRowsToReadCurrentError``) (We use the same
         # two objects instead of a new object in transaction B to
         # prove shared locks are taken first.)
-        #
-        # In Relstorage 3.5, the order is reversed (the 'first' in the
-        # name is no longer accurate) and transaction B waits on
-        # transaction A to finish and we should get
-        # ``UnableToLockRowsToModifyError``
-        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
         commit_lock_timeout = self.__tiny_commit_time
         _duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToLockRowsToModifyError,
+            UnableToLockRowsToReadCurrentError,
             commit_lock_timeout=commit_lock_timeout,
         )
         # The NOWAIT lock should be very quick to fire...but we don't actually hit that case
@@ -520,6 +518,7 @@ class TestLocking(TestCase):
         #
         # pylint:disable=too-many-locals,too-many-statements
         from relstorage.adapters.interfaces import UnableToAcquireLockError
+        from relstorage.adapters.interfaces import UnableToLockRowsDeadlockError
 
         store_conn_pool = self._storage._store_connection_pool
         self.assertEqual(store_conn_pool.instance_count, 1)
@@ -625,6 +624,9 @@ class TestLocking(TestCase):
         thread_locking_b.join(1)
         thread_locking_c.join(1)
 
-        # Neither one produced an error
-        self.assertIsNone(storageB.last_error)
-        self.assertIsNone(storageC.last_error)
+        # One or the other produced an error
+        self.assertTrue(bool(storageB.last_error) ^ bool(storageC.last_error))
+
+        # It is a deadlock error
+        self.assertIsInstance(storageB.last_error or storageC.last_error,
+                              UnableToLockRowsDeadlockError)
