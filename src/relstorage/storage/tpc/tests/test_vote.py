@@ -66,6 +66,7 @@ class MockCache(object):
     def after_tpc_finish(self, *_args):
         """does nothing"""
 
+
 class MockStorage(object):
 
     def __init__(self):

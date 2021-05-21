@@ -99,6 +99,7 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         void delitem(OID_t key, TID_t tid) except +
         void freeze(OID_t key, TID_t tid) except +
         bool contains(OID_t key)
+        TID_t contains_oid_with_newer_tid(OID_t key, TID_t tid)
         void age_frequencies()
         ICacheEntry* get(OID_t key)
         SVCacheEntry* get(OID_t, TID_t)

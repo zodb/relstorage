@@ -354,6 +354,11 @@ class LocalClient(object):
         oid, tid = oid_tid
         return self._cache.get_item_with_tid(oid, tid) is not None
 
+    def contains_oid_with_newer_tid(self, oid, tid):
+        tid = self._cache.contains_oid_with_newer_tid(oid, tid)
+        if tid > -1:
+            return tid
+
     def get(self, oid_tid, peek=False):
         oid, tid = oid_tid
         assert tid is None or tid >= 0

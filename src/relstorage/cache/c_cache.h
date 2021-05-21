@@ -492,6 +492,7 @@ namespace cache {
         virtual ICacheEntry* freeze_to_tid(const TID_t tid) = 0;
         virtual ICacheEntry* discarding_tids_before(const TID_t tid) = 0;
 
+        virtual TID_t newest_tid() const = 0;
     };
 
     // BIT::key_of_value function object, must:
@@ -705,6 +706,11 @@ namespace cache {
             return this->_tid;
         }
 
+        virtual TID_t newest_tid() const
+        {
+            return this->_tid;
+        }
+
         bool& frozen()
         {
             return this->_frozen;
@@ -885,7 +891,7 @@ namespace cache {
             return new_entry;
         }
 
-        TID_t newest_tid() const
+        virtual TID_t newest_tid() const
         {
             return this->p_values.rbegin()->tid;
         }
@@ -1284,6 +1290,8 @@ namespace cache {
         void freeze(OID_t key, TID_t tid);
 
         bool contains(const OID_t key) const;
+
+        TID_t contains_oid_with_newer_tid(const OID_t key, const TID_t tid);
 
         /**
           * Return the entry for the OID, if it exists. May return a
