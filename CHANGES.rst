@@ -7,7 +7,7 @@
 
 - Revert :issue:`469` and return to taking shared locks before
   exclusive locks. Testing in a large, busy application indicated that
-  performance was overall slightly worse this way.
+  performance was overall slightly worse this way. See :pr:`471`.
 
 
 3.5.0a1 (2021-05-17)
