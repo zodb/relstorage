@@ -345,9 +345,11 @@ cdef class PyCache:
         Answer whether we know that we have a cached value containing
         a TID newer than the given TID.
 
-        If we do, return the TID. If we don't, return -1.
+        If we do, return the TID. If we don't, return None.
         """
-        return self.cache.contains_oid_with_newer_tid(key, tid)
+        cdef TID_t result = self.cache.contains_oid_with_newer_tid(key, tid)
+        if result != -1:
+            return result
 
     cpdef CachedValue get(self, OID_t key):
         entry = self.cache.get(key)
