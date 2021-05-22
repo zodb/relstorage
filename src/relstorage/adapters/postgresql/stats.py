@@ -34,6 +34,8 @@ class PostgreSQLStats(AbstractStats):
         "SELECT reltuples::bigint FROM pg_class WHERE relname = 'object_state'"
     )
 
+    _get_object_count_query = query_property('_get_object_count')
+
     _update_object_count_queries = (
         # Only on PG11 can you list more than one table.
         'ANALYZE current_object',
@@ -41,6 +43,15 @@ class PostgreSQLStats(AbstractStats):
     )
 
     _update_object_count_query = query_property('_update_object_count')
+
+    def get_object_count(self):
+        """Returns the approximate number of objects in the database"""
+        conn, cursor = self.connmanager.open_for_load()
+        try:
+            cursor.execute(self._get_object_count_query)
+            return cursor.fetchone()[0]
+        finally:
+            self.connmanager.close(conn, cursor)
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""

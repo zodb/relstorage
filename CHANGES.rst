@@ -20,6 +20,10 @@
   This more closely matches what ``FileStorage`` does and can help
   avoid some unnecessary work.
 
+- Fix the speed of getting the approximate number of objects in a
+  storage by using ``len(storage)`` on PostgreSQL. This was a
+  regression after 3.0a13.
+
 3.5.0a1 (2021-05-17)
 ====================
 
