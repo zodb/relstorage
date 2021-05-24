@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.5.0a2 (unreleased)
+3.5.0a2 (2021-05-24)
 ====================
 
 - Revert :issue:`469` and return to taking shared locks before
