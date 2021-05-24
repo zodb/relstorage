@@ -42,6 +42,12 @@ class TransactionConflictsWithItselfError(ReadConflictError):
     The transaction asked for two different OIDs for the same object.
     """
 
+class CacheHasNewerTidError(ReadConflictError):
+    """
+    Our cache knows about a newer TID for this same object, so
+    we can doom the transaction now; there's a readCurrent conflict.
+    """
+
 class _BadFactory(object):
 
     def enter(self, storage):
@@ -139,6 +145,16 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
                 oid=oid,
                 serials=(int64_to_8bytes(previous_serial_int),
                          required_tid))
+
+        newer_tid = self.shared_state.local_client.contains_oid_with_newer_tid(oid_int,
+                                                                               required_tid_int)
+        if newer_tid:
+            raise CacheHasNewerTidError(
+                oid=oid,
+                serials=(int64_to_8bytes(newer_tid),
+                         required_tid)
+            )
+
         required_tids[oid_int] = required_tid_int
 
         # Previously, we used Loader.getTid() (a wrapper around

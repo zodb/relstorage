@@ -340,6 +340,17 @@ cdef class PyCache:
     def __len__(self):
         return self.cache.size()
 
+    def contains_oid_with_newer_tid(self, OID_t key, TID_t tid):
+        """
+        Answer whether we know that we have a cached value containing
+        a TID newer than the given TID.
+
+        If we do, return the TID. If we don't, return None.
+        """
+        cdef TID_t result = self.cache.contains_oid_with_newer_tid(key, tid)
+        if result != -1:
+            return result
+
     cpdef CachedValue get(self, OID_t key):
         entry = self.cache.get(key)
         if not entry:

@@ -120,6 +120,10 @@ class SharedTPCState(object):
         self._used_resources = []
 
     @_LazyResource
+    def local_client(self):
+        return self._storage._cache.local_client
+
+    @_LazyResource
     def store_connection(self):
         conn = self._storage._store_connection_pool.borrow()
         # Report on the connection we will use.

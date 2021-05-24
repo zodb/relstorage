@@ -612,6 +612,16 @@ bool Cache::contains(const OID_t key) const
     return this->data.count(key) == 1;
 }
 
+TID_t Cache::contains_oid_with_newer_tid(OID_t key, const TID_t tid)
+{
+    if_existing(key, -1);
+    TID_t newest = existing_entry.newest_tid();
+    if (newest > tid) {
+        return newest;
+    }
+    return -1;
+}
+
 ICacheEntry* Cache::get(const OID_t key)
 {
     if_existing(key, nullptr);

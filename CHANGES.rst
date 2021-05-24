@@ -9,6 +9,20 @@
   exclusive locks. Testing in a large, busy application indicated that
   performance was overall slightly worse this way. See :pr:`471`.
 
+- Use the cache to cheaply check if a ``readCurrent()``  violation
+  will take place during an early part of two-phase commit, instead of
+  waiting until ``tpc_vote`` when we've sent data to the database. If
+  the cache can prove that there is a newer version of an object
+  stored, the conflict error will be raised during ``commit``; if the
+  cache can't prove it, the error will still be raised during
+  ``tpc_vote``.
+
+  This more closely matches what ``FileStorage`` does and can help
+  avoid some unnecessary work.
+
+- Fix the speed of getting the approximate number of objects in a
+  storage by using ``len(storage)`` on PostgreSQL. This was a
+  regression after 3.0a13.
 
 3.5.0a1 (2021-05-17)
 ====================

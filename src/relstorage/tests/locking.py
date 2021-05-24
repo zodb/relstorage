@@ -219,6 +219,7 @@ class TestLocking(TestCase):
         # Proves that if we try to check an old serial that has already moved on,
         # we don't try taking exclusive locks at all.
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        from relstorage.storage.tpc.begin import CacheHasNewerTidError
         obj1_oid, obj2_oid, tid, db = self.__store_two_for_read_current_error()
         assert obj1_oid, obj1_oid
         assert obj2_oid, obj2_oid
@@ -263,6 +264,13 @@ class TestLocking(TestCase):
         # Now, try to readCurrent of object2 in the old tid, and take an exclusive lock
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
+        #
+        # Well, first, it's in the cache as newer, so we get a cache error.
+        with self.assertRaises(CacheHasNewerTidError):
+            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
+
+        # So if we take it out of the cache we go to the database.
+        storageB._cache.clear()
         with self.assertRaises(VoteReadConflictError):
             self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
