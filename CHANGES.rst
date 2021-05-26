@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.5.0a3 (unreleased)
+3.5.0a3 (2021-05-26)
 ====================
 
 - PostgreSQL: Stop sorting rows unnecessarily during the
