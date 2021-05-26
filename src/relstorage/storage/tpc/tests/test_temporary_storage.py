@@ -25,7 +25,7 @@ class TestTemporaryStorage(unittest.TestCase):
         del temporary_storage.id
         super(TestTemporaryStorage, self).tearDown()
 
-    _EMPTY_STR = '<relstorage.storage.tpc.temporary_storage.TemporaryStorage at 0xdeadbeef len: 0>'
+    _EMPTY_STR = '<TPCTemporaryStorage at 0xdeadbeef count=0 bytes=0>'
 
     def test_empty_str(self):
         temp = self._makeOne()
@@ -54,13 +54,13 @@ class TestTemporaryStorage(unittest.TestCase):
         self.assertEqual(
             s,
             dedent("""\
-            <relstorage.storage.tpc.temporary_storage.TemporaryStorage at 0xdeadbeef len: 3>
-            ================================================================================
-            | OID                      | Length                   | Previous TID            |
-            ================================================================================
-                                    1  |                        3 |                        0
-                                    2  |                        3 |                       42
-                                 6547  |                        9 |                       23
+            <TPCTemporaryStorage at 0xdeadbeef count=3 bytes=15>
+            ====================================================
+            | OID            | Length         | Previous TID  |
+            ====================================================
+                          1  |              3 |              0
+                          2  |              3 |             42
+                       6547  |              9 |             23
             """
                    )
         )

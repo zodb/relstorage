@@ -5,7 +5,13 @@
 3.5.0a3 (unreleased)
 ====================
 
-- Nothing changed yet.
+- PostgreSQL: Stop sorting rows unnecessarily during the
+  ``lock_and_move`` part of ``tpc_finish`` (MySQL was already not
+  sorting). On larger transactions and/or busier servers, this shows a
+  slight performance increase in benchmarks.
+
+- Include the transaction ID in log messages about long-running
+  transactions (once available).
 
 
 3.5.0a2 (2021-05-24)

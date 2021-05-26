@@ -22,6 +22,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import time
+from logging import DEBUG
 
 from zope.interface import implementer
 
@@ -44,6 +45,7 @@ from . import LOCK_EARLY
 from . import AbstractTPCStateDatabaseAvailable
 from .finish import Finish
 
+LOG_LEVEL_TID = DEBUG
 
 logger = __import__('logging').getLogger(__name__)
 perf_logger = logger.getChild('timing')
@@ -573,19 +575,22 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
 
             locked_duration = locks_released - self.lock_and_vote_times[0]
             between_vote_and_finish = finish_entry - self.lock_and_vote_times[1]
+            log_extra_args = (self.committing_tid_lock.tid_int,)
             do_log_duration_info(
-                "Objects were locked by %s for %.3fs",
+                "Objects were locked by %s for %.3fs (tid=%d)",
                 AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
                 self, None,
                 locked_duration,
-                perf_logger
+                perf_logger,
+                log_extra_args
             )
             do_log_duration_info(
-                "Time between vote exiting and %s entering was %.3fs",
+                "Time between vote exiting and %s entering was %.3fs (tid=%d)",
                 AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
                 self, None,
                 between_vote_and_finish,
-                perf_logger
+                perf_logger,
+                log_extra_args
             )
             self.shared_state.stat_timing(
                 'relstorage.storage.tpc_vote.objects_locked.t',

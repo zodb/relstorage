@@ -239,7 +239,8 @@ _LOG_TIMED_COMPILETIME_ENABLE = get_boolean_from_environ(
 def do_log_duration_info(basic_msg, func,
                          args, kwargs,
                          actual_duration,
-                         log=perf_logger):
+                         log=perf_logger,
+                         log_extra_args=()):
     if func is None:
         # Timing was disabled at compile time
         return
@@ -248,7 +249,6 @@ def do_log_duration_info(basic_msg, func,
     # Defer capturing the name; it might get changed at
     # runtime.
     log_msg = basic_msg
-    log_args = (func.__name__, actual_duration)
     for level, duration in func.log_levels:
         if actual_duration < duration:
             break
@@ -257,6 +257,7 @@ def do_log_duration_info(basic_msg, func,
     if not log.isEnabledFor(log_level):
         return
 
+    log_args = (func.__name__, actual_duration) + log_extra_args
     if log_level >= func.log_details_threshold:
         # This will capture 'self' as the first argument,
         # so you can put useful things into that repr if you'd
