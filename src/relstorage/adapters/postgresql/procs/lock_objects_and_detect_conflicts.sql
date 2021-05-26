@@ -134,6 +134,10 @@ BEGIN
   -- partition? prev_tid isn't the primary key, zoid is, though, and range
   -- partitioning has to include the primary key when there is one.
 
+  -- TODO: We could also use ``pg_advisory_xact_lock(temp_store.zoid)``
+  -- which should result in less table churn, especially for the shared locks.
+  -- Using it for the exclusive locks, however, breaks packing.
+
   PERFORM {CURRENT_OBJECT}.zoid
   FROM {CURRENT_OBJECT}
   INNER JOIN temp_store USING(zoid)

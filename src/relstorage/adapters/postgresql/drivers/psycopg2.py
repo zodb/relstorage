@@ -322,7 +322,7 @@ class _GeventPsycopg2WaitCallback(object):
         # to check at this level. Otherwise we can get strange hangs,
         # and one connection can monopolize the whole thing. Note that
         # this only applies when allow_switch is true.
-        poll = True
+        poll = allow_switch
         while 1:
             state = conn.poll()
             if state == self.poll_ok:

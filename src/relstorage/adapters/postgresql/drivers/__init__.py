@@ -21,6 +21,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from relstorage.options import COMMIT_EXIT_CRITICAL_SECTION_EARLY
+
 from ...drivers import implement_db_driver_options
 from ...drivers import AbstractModuleDriver
 from ...sql import DefaultDialect
@@ -95,8 +97,13 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         # either going to get the commit lock and successfully commit, or we're going to
         # fail. Either way, there's nothing we need to do to let other greenlets get going.
         # This is just like how MySQL handles it in ``callproc_multi_result``.
-        self.exit_critical_phase(conn, cursor)
-        cursor.execute(stmt, params)
+        if COMMIT_EXIT_CRITICAL_SECTION_EARLY:
+            self.exit_critical_phase(conn, cursor)
+
+        try:
+            cursor.execute(stmt, params)
+        finally:
+            self.exit_critical_phase(conn, cursor)
 
     ERRCODE_DEADLOCK = '40P01'
 

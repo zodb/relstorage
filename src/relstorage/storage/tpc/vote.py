@@ -37,6 +37,7 @@ from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from relstorage._util import TRACE
 from relstorage._util import METRIC_SAMPLE_RATE
+from relstorage.options import COMMIT_EXIT_CRITICAL_SECTION_EARLY
 from relstorage.adapters.interfaces import UnableToAcquireLockError
 from ..interfaces import VoteReadConflictError
 from ..interfaces import ITPCStateVoting
@@ -493,10 +494,10 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             # support doing that in a single operation, we need to go critical and
             # regain control ASAP so we can complete the operation.
             self._enter_critical_phase_until_transaction_end()
-        else:
+        elif COMMIT_EXIT_CRITICAL_SECTION_EARLY:
             # We're committing, and we can do so in a single trip to the database.
             # If we took the critical phase earlier to resolve conflicts, we don't need
-            # it anymore
+            # it anymore, in theory.
             self.__exit_critical_phase()
 
         # Note that this may commit the load_connection and make it not

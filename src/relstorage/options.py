@@ -16,6 +16,18 @@ from __future__ import absolute_import
 
 from relstorage._compat import PYPY
 
+from relstorage._util import get_boolean_from_environ
+
+#: Should committing exit the critical section (supported under gevent only)
+#: early? Here, early means before taking the final global database commit lock.
+#: Only applies to databases and drivers that can do this (take the lock and commit)
+#: in a single round trip to the database. The default is yes.
+#: However, if you have many committing processes at the same time, setting it to false may
+#: prevent a thundering herd effect.
+COMMIT_EXIT_CRITICAL_SECTION_EARLY = get_boolean_from_environ(
+    'RS_COMMIT_EXIT_CRIT_EARLY',
+    True
+)
 
 class Options(object):
     """Options for configuring and tuning RelStorage.
