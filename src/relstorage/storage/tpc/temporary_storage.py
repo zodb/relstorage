@@ -29,7 +29,7 @@ from relstorage._compat import OidObjectMap_max_key
 from relstorage._compat import iteroiditems
 from relstorage._compat import NStringIO
 
-class TemporaryStorage(object):
+class TPCTemporaryStorage(object):
     __slots__ = (
         '_queue',
         '_queue_contents',
@@ -118,11 +118,17 @@ class TemporaryStorage(object):
             self._queue_contents = () # Not None so len() keeps working
 
     def __repr__(self):
-        return "<%s.%s at 0x%x len: %d>" % (
-            type(self).__module__,
+        approx_size = 0
+        if self._queue is not None:
+            self._queue.seek(0, 2)  # seek to end
+            # The number of bytes we stored isn't necessarily the
+            # number of bytes we send to the server, if there are duplicates
+            approx_size = self._queue.tell()
+        return "<%s at 0x%x count=%d bytes=%d>" % (
             type(self).__name__,
             id(self),
-            len(self)
+            len(self),
+            approx_size
         )
 
     def __str__(self):
@@ -161,3 +167,5 @@ class TemporaryStorage(object):
 
 
         return out.getvalue()
+
+TemporaryStorage = TPCTemporaryStorage # BWC

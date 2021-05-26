@@ -11,11 +11,12 @@ BEGIN
   END IF;
 
   -- move_from_temp()
-  -- First the state for objects
-  -- TODO: We probably do not need to order the
-  -- temp rows. The locks we need are already held.
-  -- Skipping that appears to make a difference in plans and
-  -- benchmarks. Confirm that and remove.
+  -- First the state for objects.
+  --
+  -- We previously ordered the temp rows by zoid, presumably to avoid
+  -- deadlock, but that's not necessary. The locks we need are
+  -- already held. Skipping that appears to make a difference in plans
+  -- and benchmarks for larger transactions.
   INSERT INTO object_state (
     zoid,
     tid,
@@ -27,7 +28,6 @@ BEGIN
          COALESCE(LENGTH(state), 0),
          state
   FROM temp_store
-  ORDER BY zoid
   ON CONFLICT (zoid) DO UPDATE SET
      tid = excluded.tid,
      state_size = excluded.state_size,

@@ -29,8 +29,7 @@ BEGIN
          md5,
          COALESCE(LENGTH(state), 0),
          state
-  FROM temp_store
-  ORDER BY zoid;
+  FROM temp_store;
 
   -- Now blob chunks.
   INSERT INTO blob_chunk (
@@ -47,7 +46,6 @@ BEGIN
   SELECT zoid, tid
   FROM object_state
   WHERE tid = p_committing_tid
-  ORDER BY zoid
   ON CONFLICT (zoid) DO UPDATE SET
      tid = excluded.tid;
 
