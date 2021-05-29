@@ -7,6 +7,29 @@
 
 - Stop closing RDBMS connections when ``tpc_vote`` raises a
   semi-expected ``TransientError`` such as a ``ConflictError``.
+- PostgreSQL: Now uses advisory locks instead of row-level locks
+  during the commit process. This benchmarks substantially faster and
+  reduces the potential for table bloat.
+
+  For environments that process many large, concurrent transactions,
+  or deploy many RelStorage instances to the same database server, it
+  might be necessary to increase the PostgreSQL configuration value
+  ``max_locks_per_transaction.`` The default value of 64 is multiplied
+  by the default value of ``max_connections`` (100) to allow for 6,400
+  total objects to be locked across the entire database server. See
+  `the PostgreSQL documentation
+  <https://www.postgresql.org/docs/13/runtime-config-locks.html>`_ for
+  more information.
+
+  .. caution:: Be careful deploying this version while older versions
+               are executing. There could be a small window of time
+               where the locking strategies are different, leading to
+               database corruption.
+
+  .. note:: Deploying multiple RelStorage instances to separate
+            schemas in the same PostgreSQL database (e.g., the default
+            of "public" plus another) has never been supported. It is
+            even less supported now.
 
 
 3.5.0a3 (2021-05-26)

@@ -118,18 +118,14 @@ class AbstractLocker(DatabaseHelpersMixin,
         ("""
         SELECT zoid
         FROM current_object
-        WHERE zoid IN (
-            SELECT zoid
-            FROM temp_store
-        )
+        INNER JOIN temp_store USING (zoid)
+        WHERE temp_store.prev_tid <> 0
         """, 'current_object'),
         ("""
         SELECT zoid
         FROM object_state
-        WHERE zoid IN (
-            SELECT zoid
-            FROM temp_store
-        )
+        INNER JOIN temp_store USING (zoid)
+        WHERE temp_store.prev_tid <> 0
         """, 'object_state'),
     )
 
@@ -194,24 +190,38 @@ class AbstractLocker(DatabaseHelpersMixin,
         # possibly * N
         self._lock_rows_being_modified(cursor)
 
-    def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
-        _, table = self._get_current_objects_query
-        oids_to_lock = sorted(set(current_oids))
-        batcher = self.make_batcher(cursor)
-
-        locking_suffix = ' %s ' % (
+    def _lock_suffix_for_readCurrent(self, shared_locks_block):
+        return ' %s ' % (
             self._lock_share_clause
             if shared_locks_block
             else
             self._lock_share_clause_nowait
         )
+
+    def _lock_column_name_for_readCurrent(self, shared_locks_block):
+        # subclasses use the argument
+        # pylint:disable=unused-argument
+        return 'zoid'
+
+    def _lock_consume_rows_for_readCurrent(self, rows, shared_locks_block):
+        # subclasses use the argument
+        # pylint:disable=unused-argument
+        consume(rows)
+
+    def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
+        _, table = self._get_current_objects_query
+        oids_to_lock = sorted(set(current_oids))
+        batcher = self.make_batcher(cursor)
+
+        locking_suffix = self._lock_suffix_for_readCurrent(shared_locks_block)
+        lock_column = self._lock_column_name_for_readCurrent(shared_locks_block)
         try:
             rows = batcher.select_from(
-                ('zoid',), table,
+                (lock_column,), table,
                 suffix=locking_suffix,
                 **{'zoid': oids_to_lock}
             )
-            consume(rows)
+            self._lock_consume_rows_for_readCurrent(rows, shared_locks_block)
         except self.illegal_operation_exceptions: # pragma: no cover
             # Bug in our code
             raise

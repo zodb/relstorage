@@ -50,6 +50,7 @@ Internal Details
    relstorage.adapters.postgresql.schema
    relstorage.adapters.postgresql.stats
    relstorage.adapters.postgresql.txncontrol
+   relstorage.adapters.postgresql.util
    relstorage.adapters.replica
    relstorage.adapters.schema
    relstorage.adapters.scriptrunner

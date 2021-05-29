@@ -11,9 +11,9 @@
 
 .. tip::
 
-   Using ZODB's ``readCurrent(ob)`` method will result in taking
-   shared locks (``SELECT FOR SHARE``) in PostgreSQL for the row
-   holding the data for *ob*.
+   Prior to version 3.5.0a4, using ZODB's ``readCurrent(ob)`` method
+   will result in taking shared locks (``SELECT FOR SHARE``) in
+   PostgreSQL for the row holding the data for *ob*.
 
    This operation performs disk I/O, and consequently has an
    associated cost. We recommend using this method judiciously.

@@ -51,10 +51,6 @@ class PackUndo(DatabaseHelpersMixin):
 
     _choose_pack_transaction_query = None
 
-
-    _lock_for_share = 'FOR SHARE'
-    _lock_for_update = 'FOR UPDATE'
-
     driver = None
     connmanager = None
     runner = None
@@ -106,8 +102,7 @@ class PackUndo(DatabaseHelpersMixin):
             # (checkPackWhileReferringObjectChanges)
             return self
         result = self.__class__(self.driver, self.connmanager, self.runner, self.locker, options)
-        # Setting the MAX_TID is important for SQLite,
-        # as is the _lock_for_share.
+        # Setting the MAX_TID is important for SQLite.
         # This should probably be handled directly in subclasses.
         for k, v in vars(self).items():
             if k != 'options' and getattr(result, k, None) is not v:

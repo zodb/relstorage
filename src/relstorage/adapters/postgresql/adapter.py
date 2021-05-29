@@ -150,8 +150,6 @@ class PostgreSQLAdapter(AbstractAdapter):
                 locker=self.locker,
                 options=options,
             )
-            # TODO: Subclass for this.
-            self.packundo._lock_for_share = 'FOR KEY SHARE OF object_state'
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
             )
