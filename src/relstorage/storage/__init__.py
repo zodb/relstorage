@@ -22,7 +22,7 @@ import logging
 import sys
 import weakref
 
-
+from transaction.interfaces import TransientError
 import ZODB.interfaces
 
 
@@ -495,7 +495,15 @@ class RelStorage(LegacyMethodsMixin,
         # conflict resolution or undo.
         try:
             next_phase = self._tpc_phase.tpc_vote(self, transaction)
+        except TransientError:
+            # Most likely a ConflictError of some sort, including
+            # UnableToLockRows.... Not necessary to force close
+            # connections, it's not database related.
+            self.tpc_abort(transaction)
+            raise
         except:
+            # force will cause connections to get closed, which is slow.
+            # Only do that for really unexpected exceptions.
             self.tpc_abort(transaction, _force=True)
             raise
         else:
