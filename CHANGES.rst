@@ -5,7 +5,8 @@
 3.5.0a4 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Stop closing RDBMS connections when ``tpc_vote`` raises a
+  semi-expected ``TransientError`` such as a ``ConflictError``.
 
 
 3.5.0a3 (2021-05-26)
