@@ -44,6 +44,11 @@ class PostgreSQLLocker(AbstractLocker):
     We take advisory locks based on OID. OIDs begin at 0 and increase. To avoid
     conflicting with those, any advisory locks used for "administrative" purposes,
     such as the pack lock, need to use negative numbers.
+
+    Locks include:
+
+    - -1: The commit lock
+    - -2: The pack lock
     """
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
@@ -141,11 +146,11 @@ class PostgreSQLLocker(AbstractLocker):
 
         Raise an exception if packing or undo is already in progress.
         """
-        cursor.execute("SELECT pg_try_advisory_lock(-1)")
+        cursor.execute("SELECT pg_try_advisory_lock(-2)")
         locked = cursor.fetchone()[0]
         if not locked:
             raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        cursor.execute("SELECT pg_advisory_unlock(-1)")
+        cursor.execute("SELECT pg_advisory_unlock(-2)")
