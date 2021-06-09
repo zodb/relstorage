@@ -31,6 +31,8 @@
             of "public" plus another) has never been supported. It is
             even less supported now.
 
+  See :pr:`476`.
+
 
 3.5.0a3 (2021-05-26)
 ====================
