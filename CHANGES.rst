@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.5.0a4 (unreleased)
+3.5.0a4 (2021-06-09)
 ====================
 
 - Stop closing RDBMS connections when ``tpc_vote`` raises a
