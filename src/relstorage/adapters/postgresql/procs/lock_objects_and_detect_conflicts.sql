@@ -33,12 +33,19 @@ BEGIN
   -- Thus, take shared locks first.
 
   IF read_current_oids IS NOT NULL THEN
-    -- XXX: SELECT FOR SHARE does disk I/O! This can become expensive
+    -- Caution: SELECT FOR SHARE does disk I/O! This can become expensive
     -- and possibly lead to database issues.
     -- See https://buttondown.email/nelhage/archive/22ab771c-25b4-4cd9-b316-31a86f737acc
     -- We document this in docs/postgresql/index.rst
     --
-    -- Because of that, and because there are ZODB tests that expect
+    -- Partly because of that, and because they benchmark SOOO much faster
+    -- than row locks, we use transaction adisory locks, with the ZOID as the
+    -- key. NOTE: advisory locks are per-database (not cluster/database server,
+    -- named database within a server). This means that we cannot be used in
+    -- multiple named *schemas* in a database. But that has never actually been
+    -- supported.
+    --
+    -- Because there are ZODB tests that expect
     -- to get a ReadConflictError with an OID and TID in it
     -- (check_checkCurrentSerialInTransaction), we first run a check
     -- to see if there is definitely an issue. If there is, we just
@@ -59,41 +66,32 @@ BEGIN
       RETURN;
     END IF;
 
-
-    -- Doing this in a single query takes some effort to make sure
-    -- that the required rows all get locked. The optimizer is smart
-    -- enough to push a <> condition from an outer query into a
-    -- subquery. It is *not* smart enough to do the same with a CTE...
-    -- ...prior to PG12. In PG12, CTEs can be inlined, and if it was,
-    -- the same optimizer error would arise.
-    --
-    -- Fortunately, in PG12, "CTEs are automatically inlined if they
-    -- have no side-effects, are not recursive, and are referenced
-    -- only once in the query." The ``FOR SHARE`` clause counts as a
-    -- side-effect, and so the CTE Is not inlined.
-
-    -- Should this ever change, we could force the issue by using
-    -- 'WITH ... AS MATERIALIZED' but that's not valid syntax before
-    -- 12. (It also says recursive CTEs are not inlined, and that *is*
-    -- valid on older versions, but this isn't actually a recursive
-    -- query, even if we use that keyword, and I don't know if the
-    -- keyword alone would be enough to fool it (the plan doesn't
-    -- change on 11 when we use the keyword)).
+    -- The inner query has side-effects, so it is guaranteed to execute.
+    -- We can break if we actually fail to get a lock, and then immediately
+    -- unlock by raising an exception.
+    PERFORM got_it FROM (
+      SELECT pg_try_advisory_xact_lock_shared(t.zoid) AS got_it
+      FROM unnest(read_current_oids) t(zoid)
+      ORDER BY t.zoid
+    ) locked
+    WHERE locked.got_it <> TRUE
+    LIMIT 1;
+    -- IF that failed to get a shared lock because it is being modified
+    -- by another transaction, we need to bail immediately and release the locks
+    -- without requiring Python to abort the transaction. Unfortunately,
+    -- we have no way of knowing which lock we failed to get.
+    IF FOUND THEN
+      RAISE EXCEPTION USING ERRCODE = 'lock_not_available',
+            HINT = 'readCurrent';
+    END IF;
 
     RETURN QUERY
-      WITH locked AS (
-        SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
-        FROM {CURRENT_OBJECT}
-        INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
-          USING (zoid)
-        ORDER BY zoid
-        FOR SHARE NOWAIT
-      )
-      SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
-      FROM locked WHERE locked.tid <> locked.desired
+      SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, NULL::BIGINT, NULL::BYTEA
+      FROM {CURRENT_OBJECT}
+      INNER JOIN unnest(read_current_oids, read_current_tids) t(zoid, tid)
+        USING (zoid)
+      WHERE {CURRENT_OBJECT}.tid <> t.tid
       LIMIT 1;
-    -- If that failed to get a lock because it is being modified by another transaction,
-    -- it raised an exception.
     IF FOUND THEN
       -- We're holding shared locks here, so abort the transaction
       -- and release them; don't wait for Python to do it.
@@ -134,17 +132,12 @@ BEGIN
   -- partition? prev_tid isn't the primary key, zoid is, though, and range
   -- partitioning has to include the primary key when there is one.
 
-  -- TODO: We could also use ``pg_advisory_xact_lock(temp_store.zoid)``
-  -- which should result in less table churn, especially for the shared locks.
-  -- Using it for the exclusive locks, however, breaks packing.
-
-  PERFORM {CURRENT_OBJECT}.zoid
+  -- This either works or raises an exception.
+  PERFORM pg_advisory_xact_lock({CURRENT_OBJECT}.zoid)
   FROM {CURRENT_OBJECT}
   INNER JOIN temp_store USING(zoid)
   WHERE temp_store.prev_tid <> 0
-  ORDER BY {CURRENT_OBJECT}.zoid
-  FOR UPDATE OF {CURRENT_OBJECT};
-
+  ORDER BY {CURRENT_OBJECT}.zoid;
 
   RETURN QUERY
   SELECT cur.zoid, cur.tid,

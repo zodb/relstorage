@@ -20,10 +20,7 @@ BEGIN
   -- to indicate that the TIDs were the same, and a later view of the
   -- transaction would be incorrect (containing multiple distinct
   -- transactions).
-  SELECT tid
-  INTO scratch
-  FROM commit_row_lock
-  FOR UPDATE;
+  PERFORM pg_advisory_xact_lock(-1);
 
   SELECT COALESCE(MAX(tid), 0)
   INTO current_tid_64

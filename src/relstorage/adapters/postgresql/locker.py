@@ -19,6 +19,7 @@ from __future__ import absolute_import
 
 from zope.interface import implementer
 
+from relstorage._util import Lazy
 from ..interfaces import ILocker
 from ..interfaces import UnableToLockRowsToModifyError
 from ..interfaces import UnableToLockRowsToReadCurrentError
@@ -28,6 +29,27 @@ from ..locker import AbstractLocker
 
 @implementer(ILocker)
 class PostgreSQLLocker(AbstractLocker):
+    """
+    On PostgreSQL, for locking individual objects, we use advisory
+    locks, not row locks.
+
+    This is because row locks perform disk I/O, which can "bloat" tables;
+    this is especially an issue for shared (readCurrent) locks, which perform
+    I/O to pages that might not otherwise need it. Using many row locks
+    requires a good (auto)vacuuming setup to prevent this bloat from becoming
+    a problem.
+
+    Also, advisory locks are much faster than row locks.
+
+    We take advisory locks based on OID. OIDs begin at 0 and increase. To avoid
+    conflicting with those, any advisory locks used for "administrative" purposes,
+    such as the pack lock, need to use negative numbers.
+
+    Locks include:
+
+    - -1: The commit lock
+    - -2: The pack lock
+    """
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         # This only lasts beyond the current transaction if it
@@ -47,6 +69,45 @@ class PostgreSQLLocker(AbstractLocker):
         timeout_ms = int(timeout * 1000.0)
         self.driver.set_lock_timeout(cursor, timeout_ms)
 
+
+    @Lazy
+    def _lock_current_objects_query(self):
+        # This is not used in production, only in tests that try to interleave
+        # different types of locking.
+        get = self._get_current_objects_query[0]
+        stmt = get.replace('SELECT zoid', 'SELECT pg_advisory_xact_lock(zoid)')
+        stmt += ' ORDER BY zoid'
+        return stmt
+
+    def _lock_suffix_for_readCurrent(self, shared_locks_block):
+        # This is not used in production, only in tests that try to interleave
+        # different types of locking.
+        return ''
+
+    def _lock_column_name_for_readCurrent(self, shared_locks_block):
+        # This is not used in production, only in tests that try to interleave
+        # different types of locking.
+        return (
+            'pg_advisory_xact_lock_shared(zoid)'
+            if shared_locks_block
+            else
+            'pg_try_advisory_xact_lock_shared(zoid)'
+        )
+
+    def _lock_consume_rows_for_readCurrent(self, rows, shared_locks_block):
+        # This is not used in production, only in tests that try to interleave
+        # different types of locking.
+
+        # If we used the blocking version, it returned void (NULL/None),
+        # or raised an error. No need to examine the rows.
+        if shared_locks_block:
+            return super(PostgreSQLLocker, self)._lock_consume_rows_for_readCurrent(
+                rows,
+                shared_locks_block)
+
+        for got_lock, in rows:
+            if not got_lock:
+                raise UnableToLockRowsToReadCurrentError
 
     def release_commit_lock(self, cursor):
         # no action needed, locks released with transaction.
@@ -85,11 +146,11 @@ class PostgreSQLLocker(AbstractLocker):
 
         Raise an exception if packing or undo is already in progress.
         """
-        cursor.execute("SELECT pg_try_advisory_lock(1)")
+        cursor.execute("SELECT pg_try_advisory_lock(-2)")
         locked = cursor.fetchone()[0]
         if not locked:
             raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        cursor.execute("SELECT pg_advisory_unlock(1)")
+        cursor.execute("SELECT pg_advisory_unlock(-2)")

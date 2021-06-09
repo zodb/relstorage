@@ -20,12 +20,8 @@ from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
 from ..schema import Schema
 
-class _LockStmt(object):
-    # 8.0 supports 'FOR SHARE' but before that we have
-    # this.
-    _lock_for_share = 'LOCK IN SHARE MODE'
 
-class MySQLHistoryPreservingPackUndo(_LockStmt, HistoryPreservingPackUndo):
+class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
     # Previously we needed to work around a MySQL performance bug by
     # avoiding an expensive subquery.
@@ -112,5 +108,5 @@ class MySQLHistoryPreservingPackUndo(_LockStmt, HistoryPreservingPackUndo):
     ).limit(1000)
 
 
-class MySQLHistoryFreePackUndo(_LockStmt, HistoryFreePackUndo):
+class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
     pass

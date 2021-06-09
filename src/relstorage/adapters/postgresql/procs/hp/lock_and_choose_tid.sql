@@ -17,10 +17,8 @@ DECLARE
     current_tid_64 BIGINT;
   next_tid_64 BIGINT;
 BEGIN
-    SELECT tid
-    INTO scratch
-    FROM commit_row_lock
-    FOR UPDATE;
+    PERFORM pg_advisory_xact_lock(-1);
+
 
     SELECT COALESCE(MAX(tid), 0)
     INTO current_tid_64

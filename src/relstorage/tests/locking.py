@@ -452,8 +452,9 @@ class TestLocking(TestCase):
         duration_blocking = end - begin
 
         # Now, one or the other storage got killed by the deadlock
-        # detector, but NOT both. Which one depends on the database.
-        # PostgreSQL likes to kill the foreground thread (storageB),
+        # detector, or possibly both. Which one depends on the database.
+        # PostgreSQL likes to kill the foreground thread (storageB)
+        # when using row locks, but it sometimes kills them both ,
         # MySQL likes to kill the background thread (storageA)...
         # And Oracle likes to kill them both! Argh!
         self.assertTrue(storageA.last_error or storageB.last_error,
