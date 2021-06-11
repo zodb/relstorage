@@ -826,10 +826,10 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         stmt = self._zap_all_tbl_stmt if not slow else self._slow_zap_all_tbl_stmt
 
-        def zap_all(_conn, cursor):
+        def zap_all(conn, cursor):
             existent = set(self.list_tables(cursor))
             to_zap = {} # {normalized_name: recorded_name}
-            self._before_zap_all_tables(cursor, existent, slow)
+            self._before_zap_all_tables(conn, cursor, existent, slow)
             for possible_table in existent:
                 norm_table = self._normalize_schema_object_names([possible_table])[0]
                 if norm_table.startswith('temp_'):
@@ -858,9 +858,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     # Hooks for subclasses
 
-    def _before_zap_all_tables(self, cursor, tables, slow=False):
-        logger.debug("Before zapping existing tables (%s) with %s; slow: %s",
-                     tables, cursor, slow)
+    def _before_zap_all_tables(self, conn, cursor, tables, slow=False):
+        logger.debug("Before zapping existing tables (%s) with %s/%s; slow: %s",
+                     tables, conn, cursor, slow)
 
     def _after_zap_all_tables(self, cursor, slow=False):
         logger.debug("Running init script. Slow: %s", slow)
