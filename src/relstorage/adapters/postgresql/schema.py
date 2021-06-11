@@ -345,8 +345,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     # back if the surrounding transaction does not commit."
     _zap_all_tbl_stmt = 'TRUNCATE TABLE %s CASCADE'
 
-    def _before_zap_all_tables(self, cursor, tables, slow=False):
-        super(PostgreSQLSchemaInstaller, self)._before_zap_all_tables(cursor, tables, slow)
+    def _before_zap_all_tables(self, conn, cursor, tables, slow=False):
+        super(PostgreSQLSchemaInstaller, self)._before_zap_all_tables(conn, cursor, tables, slow)
         if not slow and 'blob_chunk' in tables:
             # If we're going to be truncating, it's important to
             # remove the large objects through lo_unlink. We have a
@@ -354,12 +354,62 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             # The `vacuumlo` command cleans up any that might have been
             # missed.
 
-            # This unfortunately results in returning a row for each
+            # This unfortunately results in executing a statement for each
             # object unlinked, but it should still be faster than
             # running a DELETE and firing the trigger for each row.
+
+            # We need to take care to do this in chunks, though,
+            # so as to not allocate all the locks available on the server
+            # (which results in a confusing "out of shared memory" error).
+            # See https://github.com/zodb/relstorage/issues/468
+            # For that reason, even a simple DELETE which *does* fire the
+            # trigger isn't good enough.
+
+            # XXX: When we run on PostgreSQL 11 and above only, we can
+            # probably use a complete server-side ``DO`` loop, because
+            # on that version you can COMMIT in the loop.
+
+            # We first copy the blob_chunk info into the temporary
+            # table so that we can DELETE from it as we go and keep
+            # track of our chunks. Once we start unlinking the blobs,
+            # we can't delete from the blob_chunk table without
+            # breaking the existing trigger that wants to unlink. And
+            # since we're spanning transactions here, we don't want to
+            # disable the trigger.
             cursor.execute("""
-            SELECT lo_unlink(t.chunk)
-            FROM
-            (SELECT DISTINCT chunk FROM blob_chunk)
-            AS t
+            CREATE TEMPORARY TABLE IF NOT EXISTS temp_zap_chunk(
+                chunk oid primary key
+            );
             """)
+            cursor.execute("""
+            INSERT INTO temp_zap_chunk
+            SELECT DISTINCT chunk
+            FROM blob_chunk;
+            """)
+            while True:
+                cursor.execute("""
+                DO $$BEGIN
+                    PERFORM lo_unlink(chunk)
+                    FROM temp_zap_chunk
+                    ORDER BY chunk
+                    LIMIT 1000;
+
+                    DELETE FROM temp_zap_chunk
+                    WHERE chunk IN (
+                       SELECT chunk
+                       FROM temp_zap_chunk
+                       ORDER BY chunk
+                       LIMIT 1000
+                    );
+                END
+                $$ LANGUAGE plpgsql;
+                SELECT MIN(chunk) FROM temp_zap_chunk;
+                """)
+                cnt, = cursor.fetchone()
+                logger.info("Unlinked 1000 blob chunks. More? %s", bool(cnt))
+                self.driver.commit(conn)
+                if not cnt:
+                    # Now we must truncate because the trigger won't let
+                    # delete's happen.
+                    cursor.execute('TRUNCATE TABLE blob_chunk;')
+                    break

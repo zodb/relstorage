@@ -66,10 +66,11 @@ class PostgreSQLAdapterMixin(object):
     def verify_adapter_from_zconfig(self, adapter):
         self.assertEqual(adapter._dsn, self.__get_adapter_zconfig_dsn())
 
-class TestBlobMerge(PostgreSQLAdapterMixin,
-                    StorageCreatingMixin,
-                    TestCase,
-                    StorageTestBase.StorageTestBase):
+class TestBlobFunctionality(
+        PostgreSQLAdapterMixin,
+        StorageCreatingMixin,
+        TestCase,
+        StorageTestBase.StorageTestBase):
     # pylint:disable=too-many-ancestors
 
     def test_merge_blobs_on_open(self):
@@ -133,6 +134,71 @@ class TestBlobMerge(PostgreSQLAdapterMixin,
         self.assertEqual(data, base_chunk + second_chunk + third_chunk)
         conn.close()
         db.close()
+
+    REALLY_EXHAUST_SHARED_MEMORY = False
+
+    def test_zapping_with_many_blobs(self):
+        # https://github.com/zodb/relstorage/issues/468
+        # If a database has many blobs (more than 4600 by default)
+        # it couldn't be zapped.
+
+        from ZODB.DB import DB
+        from ZODB.blob import Blob
+        import transaction
+        storage = self._closing(self.make_storage(
+            blob_dir='blobs', shared_blob_dir=False))
+        db = self._closing(DB(storage))
+        conn = db.open()
+
+        if self.REALLY_EXHAUST_SHARED_MEMORY: # pragma: no cover
+            # NOTE: When actually testing the shared memory exhaustion,
+            # this test is slow; it takes about 45s with default
+            # server settings and psycopg2, and 1:50 under pg8000
+
+            # First, figure out how many blobs we need to create to exceed
+            # the limit and fail: max_locks_per_transaction * max_connections
+            cursor = conn._storage._load_connection.cursor
+            cursor.execute("SELECT CURRENT_SETTING('max_locks_per_transaction')")
+            max_locks = cursor.fetchall()[0][0]
+            cursor.execute("SELECT CURRENT_SETTING('max_connections')")
+            max_conn = cursor.fetchall()[0][0]
+
+            # max_locks * max_conn is the documented limit of the locks,
+            # but it seems to actually be memory based. For example, with
+            # max_locks = 64 (the default) and max_conn = 300 (3x the default)
+            # we calculate a max_blobs of 19,200. And the server easily handles that.
+            # However, dropping down to max_conn = 100 (the default), the server
+            # fails to zap the 19,200 blobs, though it does zap the 6,400 blobs fine.
+            # Hence the final * 3
+            max_blobs = int(max_locks) * int(max_conn) * 3
+        else:
+            # Choose a number to let us loop a few times.
+            max_blobs = 3523
+
+
+        blobs = []
+        for i in range(max_blobs):
+
+            blob = Blob()
+            with blob.open('w') as f:
+                data = str(i)
+                if not isinstance(data, bytes):
+                    data = data.encode('ascii')
+                f.write(data)
+
+            blobs.append(blob)
+
+        conn.root().blobs = blobs
+        transaction.commit()
+
+        conn.close()
+        # Now zop, being sure to use the fast method that originally trigged
+        # this bug.
+        storage.zap_all(slow=False)
+        cursor = storage._load_connection.cursor
+        cursor.execute('SELECT COUNT(*) FROM blob_chunk')
+        self.assertEqual(0, cursor.fetchone()[0])
+
 
 class TestGenerateTIDPG(PostgreSQLAdapterMixin,
                         StorageCreatingMixin,
@@ -220,7 +286,7 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         super(PostgreSQLTestSuiteBuilder, self).__init__(
             drivers,
             PostgreSQLAdapterMixin,
-            extra_test_classes=(TestBlobMerge, TestGenerateTIDPG)
+            extra_test_classes=(TestBlobFunctionality, TestGenerateTIDPG)
         )
 
     def _compute_large_blob_size(self, use_small_blobs):

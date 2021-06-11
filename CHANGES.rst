@@ -5,7 +5,12 @@
 3.5.0a5 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Fix ``RelStorage.zap_all()`` and ``zodbconvert --clear`` against
+  existing PostgreSQL databases with very large numbers of Blobs and
+  relatively small amounts of shared memory (e.g., default values for
+  ``max_locks_per_transaction`` and ``max_connections``). Previously,
+  this could raise an ``out of shared memory`` error. See
+  :issue:`468`.
 
 
 3.5.0a4 (2021-06-09)
