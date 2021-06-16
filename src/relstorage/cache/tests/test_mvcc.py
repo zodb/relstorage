@@ -554,8 +554,8 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map.verify(initial=False)
         self.assertEqual(old_map.complete_since_tid, new_map.complete_since_tid)
         self.assertEqual(old_map.highest_visible_tid, new_map.highest_visible_tid)
-        self.assertEqual(old_map[1], 2)
-        self.assertEqual(old_map[2], 2)
+        self.assertEqual(old_map.bucket[1], 2)
+        self.assertEqual(old_map.bucket[2], 2)
 
     def test_merge_same_tid(self):
         # A complete map
@@ -571,9 +571,9 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map.verify(initial=False)
         self.assertEqual(old_map.complete_since_tid, new_map.complete_since_tid)
         self.assertEqual(old_map.highest_visible_tid, new_map.highest_visible_tid)
-        self.assertEqual(old_map[1], 3)
-        self.assertEqual(old_map[2], 1)
-        self.assertEqual(old_map[3], 2)
+        self.assertEqual(old_map.bucket[1], 3)
+        self.assertEqual(old_map.bucket[2], 1)
+        self.assertEqual(old_map.bucket[3], 2)
 
     def test_can_hold_old_data(self):
         # Complete maps are only complete over their range:
@@ -592,9 +592,9 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map = self._makeOne(3, complete_since_tid=2, data=((1, 3),))
 
         old_map.merge_older_tid(orig)
-        self.assertEqual(dict(orig), {1: 1, 2: 1})
+        self.assertEqual(dict(orig.bucket), {1: 1, 2: 1})
         # The merged map has both
-        self.assertEqual(dict(old_map), {1: 3, 2: 1})
+        self.assertEqual(dict(old_map.bucket), {1: 3, 2: 1})
 
 
 class TestObjectIndex(TestCase):

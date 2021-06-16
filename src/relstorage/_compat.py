@@ -51,6 +51,9 @@ __all__ = [
 
     # OID and TID datastructures and algorithms
     "OID_TID_MAP_TYPE",
+    # Use the bucket type when you'll be combining
+    # extensively with multiunion()
+    "OID_TID_BUCKET_TYPE",
     'OID_OBJECT_MAP_TYPE',
     'OID_SET_TYPE',
     'OidTMap_difference',
@@ -123,6 +126,12 @@ else:
 # The map types are rarely large, but they could sometimes be.
 # The set types are more likely to be large (e.g., a set is used to hold
 # all the OIDs we need to poll after reading from a persistent cache).
+#
+# Importantly: The BTree multiunion() operation is by far at its most
+# efficient when they operate on either Set or Bucket objects *not*
+# BTree or TreeSet objects, and not subclasses of any of those. For
+# combining ~700 Maps or Buckets, using Buckets is nearly 50% faster
+# (55s vs 28s).
 
 if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
     # For BTree and Tree set objects, if you subclass you can define two attributes
@@ -178,6 +187,9 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
         max_internal_size = OID_TID_MAP_TYPE.max_internal_size
         max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
 
+
+    OID_TID_BUCKET_TYPE = BTrees.family64.UU.Bucket
+
     OidTMap_difference = BTrees.family64.UU.difference  # pylint:disable=no-member
     OidTMap_multiunion = BTrees.family64.UU.multiunion  # pylint:disable=no-member
     OidTMap_intersection = BTrees.family64.UU.intersection  # pylint:disable=no-member
@@ -195,6 +207,7 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
 else:
     OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
+    OID_TID_BUCKET_TYPE = dict
     OID_SET_TYPE = set
     def OidTMap_difference(c1, c2):
         # Must prevent iterating while being changed

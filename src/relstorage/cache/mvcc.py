@@ -26,7 +26,7 @@ from perfmetrics import statsd_client
 from zope.interface import implementer
 
 from relstorage._compat import iterkeys
-from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
+from relstorage._compat import OID_TID_BUCKET_TYPE as OidTMap
 from relstorage._compat import OidTMap_difference
 from relstorage._compat import OidTMap_multiunion
 from relstorage._compat import OidTMap_intersection
@@ -66,7 +66,7 @@ POLL_TIMEOUT = get_duration_from_environ('RS_CACHE_POLL_TIMEOUT', None, logger=l
 
 # pylint:disable=too-many-lines
 
-class _TransactionRangeObjectIndex(OidTMap):
+class _TransactionRangeObjectIndex(object):
     """
     Holds the portion of the object index visible to transactions <=
     ``highest_visible_tid``.
@@ -89,11 +89,11 @@ class _TransactionRangeObjectIndex(OidTMap):
         'highest_visible_tid',
         'complete_since_tid',
         'accepts_writes',
+        'bucket',
     )
-
-    # When the root node of a BTree splits (outgrows ``max_internal_size``),
-    # it creates a new BTree object to be its child by calling ``type(self)()``
-    # That doesn't work if you have required arguments.
+    # IMPORTANT: Do not subclass the bucket type; multiunion(),
+    # as used to implement keys() is far faster when
+    # the *exact* bucket type is given to it.
 
     def __init__(self, highest_visible_tid=0, complete_since_tid=None, data=()):
         assert complete_since_tid is None or highest_visible_tid >= complete_since_tid
@@ -101,7 +101,7 @@ class _TransactionRangeObjectIndex(OidTMap):
         self.complete_since_tid = complete_since_tid
         self.accepts_writes = True
 
-        OidTMap.__init__(self, data)
+        self.bucket = OidTMap(data)
 
         if self:
             # Verify the data matches what they told us.
@@ -148,7 +148,7 @@ class _TransactionRangeObjectIndex(OidTMap):
         """
         assert not self.complete_since_tid
         assert newer_bucket.highest_visible_tid >= self.highest_visible_tid
-        self.update(newer_bucket)
+        self.bucket.update(newer_bucket.bucket)
         if newer_bucket.highest_visible_tid > self.highest_visible_tid:
             self.highest_visible_tid = newer_bucket.highest_visible_tid
             self.complete_since_tid = newer_bucket.complete_since_tid
@@ -159,7 +159,7 @@ class _TransactionRangeObjectIndex(OidTMap):
         merge the two into this object.
         """
         assert bucket.highest_visible_tid == self.highest_visible_tid
-        self.update(bucket)
+        self.bucket.update(bucket.bucket)
         if bucket.complete_since_tid < self.complete_since_tid:
             self.complete_since_tid = bucket.complete_since_tid
 
@@ -180,9 +180,16 @@ class _TransactionRangeObjectIndex(OidTMap):
         #debug('Diff between self', dict(self), "and", dict(bucket), items_not_in_self)
         # bring missing data into ourself, being careful not to overwrite
         # things we do have.
-        self.update(bucket.items_not_in(self))
+        self.bucket.update(bucket.items_not_in(self))
         if bucket.complete_since_tid and bucket.complete_since_tid < self.complete_since_tid:
             self.complete_since_tid = bucket.complete_since_tid
+
+    ###
+    # Mapping-like things.
+    # NOTE: We deliberately do not implement __getitem__ to avoid
+    # attempting to iterate that way.
+    ###
+
 
     # These raise ValueError if the map is empty
     if not hasattr(OidTMap, 'maxKey'):
@@ -190,14 +197,23 @@ class _TransactionRangeObjectIndex(OidTMap):
 
     if hasattr(OidTMap, 'itervalues'): # BTrees, or Python 2 dict
         def maxValue(self):
-            return max(self.itervalues())
+            return max(self.bucket.itervalues())
         def minValue(self):
-            return min(self.itervalues())
+            return min(self.bucket.itervalues())
     else:
         def maxValue(self):
-            return max(self.values())
+            return max(self.bucket.values())
         def minValue(self):
-            return min(self.values())
+            return min(self.bucket.values())
+
+    def __len__(self):
+        return len(self.bucket)
+
+    def update(self, data):
+        self.bucket.update(data)
+
+    def __setitem__(self, key, value):
+        self.bucket[key] = value
 
     if not hasattr(OidTMap, 'iteritems'):
         iteritems = OidTMap.items
@@ -206,7 +222,7 @@ class _TransactionRangeObjectIndex(OidTMap):
         """
         Return the ``(k, v)`` pairs in self whose ``k`` is not found in *other*
         """
-        return OidTMap_difference(self, other)
+        return OidTMap_difference(self.bucket, other.bucket)
 
     max_stored_tid = maxValue
     min_stored_tid = minValue
@@ -365,21 +381,21 @@ class _ObjectIndex(object):
         }
 
     def keys(self):
-        return OidTMap_multiunion(self.maps)
+        return OidTMap_multiunion([m.bucket for m in self.maps])
 
     def __getitem__(self, oid):
         for mapping in self.maps:
             try:
                 # TODO: Microbenchmark this. Which is faster,
                 # try/catch or .get()?
-                return mapping[oid]
+                return mapping.bucket[oid]
             except KeyError:
                 pass
         # No data. Could it be frozen? We'll let the caller decide.
         return None
 
     def __contains__(self, oid):
-        return any(oid in m for m in self.maps)
+        return any(oid in m.bucket for m in self.maps)
 
     def __setitem__(self, oid, tid):
         # Silently discard things that are too new.
@@ -550,7 +566,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
     # it polls, it will drop its ZODB object cache. When configured
     # properly, this may indicate an idle connection without a
     # connection pool idle timeout configured, or a very long-duration
-    # read transaction. It sites with high transaction turnover, but
+    # read transaction. In sites with high transaction turnover, but
     # few concurrent requests to any given process, it may also
     # indicate low concurrency, e.g., the first connection in the pool
     # is used most of the time, and by the time there's two concurrent
@@ -817,7 +833,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # TODO: Except for that 'ignore_tid' passed to the viewer's
             # poll method, we could very efficiently do this with
             # OidTMap_multiunion with one call to C.
-            changes.update(change_dicts.pop())
+            changes.update(change_dicts.pop().bucket)
 
         return iteroiditems(changes)
 
@@ -906,9 +922,10 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # Immediately also mark it as closed before we start mutating its
             # contents. No more storing to this one!
             obsolete_bucket.accepts_writes = False
+            # From now on we just need the raw map bucket.
+            obsolete_bucket = obsolete_bucket.bucket
             newer_oids = object_index.keys()
             in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
-
             self.log(
                 LTRACE,
                 "Examining %d old OIDs to see if they've been replaced",
