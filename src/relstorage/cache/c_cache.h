@@ -74,6 +74,8 @@ typedef unsigned int uint32_t;
 
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
+#include <boost/unordered_set.hpp>
+#include <boost/unordered_map.hpp>
 
 /*
  * No version of MSVC properly supports inline. Sigh.
