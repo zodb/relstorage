@@ -42,6 +42,7 @@ from relstorage.options import Options
 from relstorage.interfaces import IMVCCDatabaseViewer
 
 from .interfaces import IStorageCacheMVCCDatabaseCoordinator
+from .cache import OidTidMap as OidTMap
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -215,8 +216,8 @@ class _TransactionRangeObjectIndex(object):
     def __setitem__(self, key, value):
         self.bucket[key] = value
 
-    if not hasattr(OidTMap, 'iteritems'):
-        iteritems = OidTMap.items
+    # if not hasattr(OidTMap, 'iteritems'):
+    #     iteritems = OidTMap.items
 
     def items_not_in(self, other):
         """

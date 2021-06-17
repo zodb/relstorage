@@ -15,6 +15,7 @@ cdef extern from * namespace "boost":
 
 
 cdef extern from "c_cache.h" namespace "relstorage::cache":
+    # XXX: Aren't these unsigned?
     ctypedef int64_t TID_t
     ctypedef int64_t OID_t
 
