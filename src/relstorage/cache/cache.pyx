@@ -86,8 +86,6 @@ cdef extern from *:
     void map_insert_bulk[M, I](M*, I, I)
     OID_t get_key(pair[OID_t, TID_t])
 
-cdef extern from "sorters.c":
-    size_t sort_int_nodups(OID_t* array, size_t n)
 
 ctypedef Map[OID_t, TID_t] MapType
 
