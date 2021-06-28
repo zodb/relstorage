@@ -21,12 +21,12 @@ from cpython.bytes cimport PyBytes_AsString # Does NOT copy
 from libcpp.pair cimport pair
 from libcpp.cast cimport static_cast
 from libcpp.cast cimport dynamic_cast
-from libcpp.map cimport map as Map
+from libcpp.set cimport set as std_set
 from libcpp.vector cimport vector
 from libcpp.iterator cimport back_inserter
 from libcpp.iterator cimport inserter
 from libcpp.algorithm cimport transform
-from libcpp.algorithm cimport copy_n
+
 from libcpp.string cimport string
 
 from relstorage.cache.c_cache cimport TID_t
@@ -40,8 +40,6 @@ from relstorage.cache.c_cache cimport move
 from relstorage.cache.c_cache cimport TempCacheFiller
 from relstorage.cache.c_cache cimport ProposedCacheEntry
 
-from relstorage.cache.c_cache cimport unordered_set as Set
-from relstorage.cache.c_cache cimport unordered_map as Map
 
 import sys
 from relstorage.cache.interfaces import NoSuchGeneration
@@ -69,97 +67,16 @@ cdef extern from *:
         delete[] t;
     }
 
-    template <typename M, typename I>
-    void map_insert_bulk(M* map, I begin, I end) {
-        map->insert(begin, end);
-    }
-
     template <typename T>
     typename T::first_type get_key(T pair) {
         return pair.first;
     }
 
-    #define KEY_TYPE long long
-    #define ZODB_64BIT_INTS
     """
     T* array_new[T](int)
     void array_delete[T](T* t)
-    void map_insert_bulk[M, I](M*, I, I)
     OID_t get_key(pair[OID_t, TID_t])
 
-
-ctypedef Map[OID_t, TID_t] MapType
-
-@cython.final
-cdef class OidTidMap:
-    cdef MapType _map
-
-    def __init__(self, data=()):
-        self._map.clear()
-        for k, v in data:
-            self._map[k] = v
-
-    def __len__(self):
-        return self._map.size()
-
-    def __setitem__(self, OID_t k, TID_t v):
-        self._map[k] = v
-
-    def __getitem__(self, OID_t key):
-        search = self._map.find(key)
-        if search != self._map.end():
-            return deref(search).second
-        raise KeyError(key)
-
-    def update(self, data):
-        cdef OidTidMap other
-        cdef MapType.iterator it
-        if isinstance(data, OidTidMap):
-            other = data
-            # The insert(InputIt, InputIt) member isn't available
-            # because of...overriding reasons?
-            map_insert_bulk[MapType, MapType.iterator](&self._map,
-                                                       other._map.begin(),
-                                                       other._map.end())
-        else:
-            for k, v in data:
-                self._map[k] = v
-
-    def values(self):
-        return [x.second for x in self._map]
-
-    def items(self):
-        return [(x.first, x.second) for x in self._map]
-
-    @staticmethod
-    def multiunion(maps):
-        # 700 equal sets:
-        # BTree multiunion: 1.4ms
-        # Same algorithm (get all sorted, truncate excess): 4.11ms
-        # Simple set inserting: 2.02ms (1.93ms without the final set conversion)
-        # Same (simple insert, no final conversion) but with unordered_set:
-        #   1.37ms
-        # Same but with boost unordered_set: 1.12ms (but no return to python at all)
-        cdef OidTidMap a_map
-        cdef Set[OID_t] result
-        for a_map in maps:
-            for p in a_map._map:
-               result.insert(p.first)
-
-        #return result # automatic C++ Set -> set conversion happens here. But not for boost set.
-        # cdef OidTidMap a_map
-        # cdef vector[OID_t] all_oids
-        # cdef vector[OID_t] sorted_no_dups
-        # # Get them all in sorted order
-        # # TODO: Reserve extra space with reserve()
-        # # TODO: Surely there's a standard pair iterator that returns
-        # # only the first or second?
-        # for a_map in maps:
-        #     transform(a_map._map.begin(), a_map._map.end(), back_inserter(all_oids), get_key)
-
-        # how_many = sort_int_nodups(all_oids.data(), all_oids.size())
-        # copy_n(all_oids.begin(), how_many, back_inserter(sorted_no_dups))
-        # return sorted_no_dups
 
 ctypedef const SVCacheEntry* SVCacheEntry_p
 ctypedef const MVCacheEntry* MVCacheEntry_p

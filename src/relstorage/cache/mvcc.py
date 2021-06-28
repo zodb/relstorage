@@ -42,7 +42,12 @@ from relstorage.options import Options
 from relstorage.interfaces import IMVCCDatabaseViewer
 
 from .interfaces import IStorageCacheMVCCDatabaseCoordinator
-from .cache import OidTidMap as OidTMap
+
+from relstorage._inthashmap import OidTidMap as OidTMap
+from relstorage._inthashmap import OidSet
+OidTMap_multiunion = OidTMap.multiunion
+OidTMap_intersection = OidSet.keeping_only_keys_in_map
+OidTMap_difference = OidTMap.difference
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -181,6 +186,7 @@ class _TransactionRangeObjectIndex(object):
         #debug('Diff between self', dict(self), "and", dict(bucket), items_not_in_self)
         # bring missing data into ourself, being careful not to overwrite
         # things we do have.
+        # XXX: This could be one C call instead of two.
         self.bucket.update(bucket.items_not_in(self))
         if bucket.complete_since_tid and bucket.complete_since_tid < self.complete_since_tid:
             self.complete_since_tid = bucket.complete_since_tid
@@ -925,8 +931,13 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             obsolete_bucket.accepts_writes = False
             # From now on we just need the raw map bucket.
             obsolete_bucket = obsolete_bucket.bucket
-            newer_oids = object_index.keys()
-            in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
+            # XXX: These two lines could be done with one call into C, eliminating the temporary
+            # ``newer_oids``. That may or may not be faster?
+            #newer_oids = object_index.keys()
+            #in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
+            #del newer_oids # intersect might be destructive
+            in_both = OidTMap.keys_in_both([tmap.bucket for tmap in object_index.maps],
+                                           obsolete_bucket)
             self.log(
                 LTRACE,
                 "Examining %d old OIDs to see if they've been replaced",

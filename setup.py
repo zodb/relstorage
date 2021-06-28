@@ -161,13 +161,21 @@ setup(
                 # XXX: Why this flag or Python 2/Windows? /EHa (catch SEH and standard) seems better.
                 extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
             ),
-
+            Extension(
+                name="relstorage._inthashmap",
+                language="c++",
+                sources=[
+                    'src/relstorage/_inthashmap.pyx',
+                ],
+                include_dirs=['include'],
+                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+            ),
         ],
         annotate=True,
         compiler_directives={
             'language_level': '3str',
             'always_allow_keywords': False,
-            'infer_types': False,
+            'infer_types': True,
             'nonecheck': False,
         },
     ),

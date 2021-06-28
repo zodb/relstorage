@@ -53,17 +53,8 @@
  */
 
 /** Basic types */
-/* The compiler used for Python 2.7 on Windows doesn't include
-   either stdint.h or cstdint.h. Nor does it understand nullptr or have
-   std::shared_ptr. Sigh. */
-#if defined(_MSC_VER) &&  _MSC_VER <= 1500
-typedef unsigned long long uint64_t;
-typedef signed long long int64_t;
-typedef unsigned int uint32_t;
-#define nullptr NULL
-#else
-#include <cstdint>
-#endif
+#include "../_rs_types.h"
+
 #define NDEBUG 1
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
@@ -74,8 +65,6 @@ typedef unsigned int uint32_t;
 
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
-#include <boost/unordered_set.hpp>
-#include <boost/unordered_map.hpp>
 
 /*
  * No version of MSVC properly supports inline. Sigh.
@@ -120,11 +109,6 @@ namespace relstorage {
 namespace cache {
     namespace BIT = boost::intrusive;
 
-    typedef int64_t TID_t;
-    // OIDs start at zero and go up from there. We use
-    // a signed type though to distinguish uninitialized values:
-    // they'll be less than 0.
-    typedef int64_t OID_t;
     typedef rs_string Pickle_t;
 
     typedef

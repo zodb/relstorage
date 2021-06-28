@@ -440,6 +440,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
                 # pylint:disable=signature-differs
                 try:
                     for x in RowBatcher.select_from(self, *args, **kwargs):
+                        print("Yielding", x)
                         yield x
                 except AggregateOperationTimeoutError as ex:
                     MockRowBatcher.ex = ex
@@ -592,9 +593,9 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map = self._makeOne(3, complete_since_tid=2, data=((1, 3),))
 
         old_map.merge_older_tid(orig)
-        self.assertEqual(dict(orig.bucket), {1: 1, 2: 1})
+        self.assertEqual(dict(orig.bucket.items()), {1: 1, 2: 1})
         # The merged map has both
-        self.assertEqual(dict(old_map.bucket), {1: 3, 2: 1})
+        self.assertEqual(dict(old_map.bucket.items()), {1: 3, 2: 1})
 
 
 class TestObjectIndex(TestCase):
