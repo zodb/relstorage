@@ -45,6 +45,7 @@ from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
 from relstorage._inthashmap import OidTidMap as OidTMap
 from relstorage._inthashmap import OidSet
+from relstorage._inthashmap import remove_non_matching_values
 OidTMap_multiunion = OidTMap.multiunion
 OidTMap_intersection = OidSet.keeping_only_keys_in_map
 OidTMap_difference = OidTMap.difference
@@ -936,32 +937,36 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             #newer_oids = object_index.keys()
             #in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
             #del newer_oids # intersect might be destructive
-            in_both = OidTMap.keys_in_both([tmap.bucket for tmap in object_index.maps],
-                                           obsolete_bucket)
-            self.log(
-                LTRACE,
-                "Examining %d old OIDs to see if they've been replaced",
-                len(in_both)
-            )
+            # in_both = OidTMap.keys_in_both([tmap.bucket for tmap in object_index.maps],
+            #                                obsolete_bucket)
+            # self.log(
+            #     LTRACE,
+            #     "Examining %d old OIDs to see if they've been replaced",
+            #     len(in_both)
+            # )
 
-            for oid in in_both:
-                old_tid = obsolete_bucket[oid]
-                newer_tid = object_index[oid]
-                # We intersected, we're sure that they're both not None.
-                if newer_tid != old_tid:
-                    # Note that even though we're removing data from
-                    # this bucket that might be in the range that it
-                    # claims to have complete index data for, that's
-                    # fine: The end result when we put everything back
-                    # together is still going to be complete index
-                    # data, because the object changed in the future.
-                    # This particular transaction chunk won't be complete, but
-                    # it's inaccessible.
-                    # This is where we should hook in the 'invalidation' tracing.
-                    del obsolete_bucket[oid]
-                    oids_tids_to_del[oid] = old_tid # These will just keep going up
-                    # If we have a shared memcache, we can't be sure everyone
+            # for oid in in_both:
+            #     old_tid = obsolete_bucket[oid]
+            #     newer_tid = object_index[oid]
+            #     # We intersected, we're sure that they're both not None.
+            #     if newer_tid != old_tid:
+            #         # Note that even though we're removing data from
+            #         # this bucket that might be in the range that it
+            #         # claims to have complete index data for, that's
+            #         # fine: The end result when we put everything back
+            #         # together is still going to be complete index
+            #         # data, because the object changed in the future.
+            #         # This particular transaction chunk won't be complete, but
+            #         # it's inaccessible.
+            #         # This is where we should hook in the 'invalidation' tracing.
+            #         del obsolete_bucket[oid]
+            #         oids_tids_to_del[oid] = old_tid # These will just keep going up
+            #         # If we have a shared memcache, we can't be sure everyone
                     # else is done with this key, so we just leave it alone.
+
+            remove_non_matching_values([tmap.bucket for tmap in object_index.maps],
+                                       obsolete_bucket,
+                                       oids_tids_to_del)
 
             # Now at this point, the obsolete_bucket contains data that we know is
             # either not present in a future map, or is present with exactly the

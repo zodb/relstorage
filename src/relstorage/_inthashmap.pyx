@@ -248,14 +248,21 @@ from libcpp.algorithm cimport copy
 from libcpp.algorithm cimport find
 from libcpp.algorithm cimport sort
 
+# from libcpp.set cimport set as Set
+# from libcpp.map cimport map as Map
+# ctypedef Map[OID_t, TID_t] MapType
+# ctypedef Set[OID_t] SetType
 
 ctypedef unordered_map[OID_t, TID_t] MapType
+ctypedef unordered_set[OID_t] SetType
+
 ctypedef vector[OID_t] VectorOidType
 ctypedef VectorOidType.iterator VectorOidIterator
+ctypedef vector[MapType*] VectorMapPtrType
 
 @cython.final
 cdef class OidSet:
-    cdef unordered_set[OID_t] _set
+    cdef SetType _set
 
     def __init__(self, oids=None):
         if oids:
@@ -413,6 +420,23 @@ cdef class OidTidMap:
     def keys_in_both(maps, OidTidMap a_map):
         cdef OidSet result = OidSet()
         # XXX: Should we nogil this whole function body?
+
+        # Using boost's unordered containers:
+        # multiunion of maps into sorted order, and also sorting
+        # ``a_map`` and then searching the sorted ``maps`` took 38s
+        # for the big set of OIDs and 25s for the small set of OIDs.
+        # Profiling a debug (-Og) version showed all the time was in the ``back_inserter``
+        # in the ``transform`` call in ``multiunion_into``. Changing to a
+        # manual loop had unclear results.
+        #
+        # Switching to a strategy of iterating the (presumably small) single map
+        # and probing each individual map to see if it contains each key
+        # takes a mear 5s for the small set of oids! BUT: It takes 41s
+        # for the 172,558 unique OIDs. It's obvious why: In the small case, we
+        # need only ever look at the first map.
+        #
+        # Using the stdlib sorted containers, the big case was 105s, while
+        # the small case was 5.9s.
         cdef VectorOidType a_map_sorted
         cdef VectorOidType sorted_no_dups
         cdef VectorOidIterator search_fwd
@@ -437,7 +461,58 @@ cdef class OidTidMap:
             if search_fwd == search_end:
                 break
             result.c_add(candidate)
+
+        # cdef OidTidMap t
+        # cdef MapType* m
+        # cdef VectorMapPtrType c_maps
+        # for t in maps:
+        #     c_maps.push_back(&t._map)
+
+        # for pair in a_map._map:
+        #     for m in c_maps:
+        #         if m.find(pair.first) != m.end():
+        #             result.c_add(pair.first)
+        #             break
+
         return result
+
+cpdef remove_non_matching_values(maps, OidTidMap obsolete_bucket, OidTidMap to_delete) except +:
+    # This takes the whole benchmark to 3s for the small group of OIDs, and
+    # 34s for the big group of OIDs.
+    cdef OidTidMap t
+    cdef MapType* m
+    cdef VectorMapPtrType c_maps
+    cdef MapType.iterator obsolete_it
+    cdef MapType.iterator obsolete_end
+    cdef bint removed
+    # XXX: Be sure we iterate this in the right order, we want the newest data.
+    if maps is None or obsolete_bucket is None or to_delete is None:
+        raise TypeError
+    for t in maps:
+        c_maps.push_back(&t._map)
+
+    with nogil:
+
+        obsolete_it = obsolete_bucket._map.begin()
+        obsolete_end = obsolete_bucket._map.end()
+
+        while obsolete_it != obsolete_end:
+            removed = False
+            for m in c_maps:
+                found = m.find(deref(obsolete_it).first)
+                #print("Searching for", deref(obsolete_it).first, "found?", found != m.end())
+                if found != m.end():
+                    # Yay, we found it. Does it match?
+                    #print("Found; match?", deref(found).second, deref(obsolete_it).second)
+                    if deref(found).second != deref(obsolete_it).second:
+                        # It does not. We have something newer. Drop it.
+                        removed = True
+                        to_delete._map[deref(obsolete_it).first] = deref(obsolete_it).second
+                        obsolete_it = obsolete_bucket._map.erase(obsolete_it)
+                        obsolete_end = obsolete_bucket._map.end()
+                    break
+            if not removed:
+                preincr(obsolete_it)
 
 
 cdef void multiunion_into(maps, VectorOidType* result) except +:
@@ -466,7 +541,6 @@ cdef void multiunion_into(maps, VectorOidType* result) except +:
     result.reserve(how_many)
     for i in range(how_many):
         result.push_back(all_oids[i])
-
 
 
 # Local Variables:
