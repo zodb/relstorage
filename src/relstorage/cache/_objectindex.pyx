@@ -61,7 +61,6 @@ cdef class _TransactionRangeObjectIndex:
     cdef public bint accepts_writes
     cdef OidTidMap bucket
 
-
     def __init__(self, highest_visible_tid=0, complete_since_tid=None, data=()):
         assert complete_since_tid is None or highest_visible_tid >= complete_since_tid
         self.highest_visible_tid = highest_visible_tid
@@ -85,10 +84,17 @@ cdef class _TransactionRangeObjectIndex:
             )
 
     @property
+    def raw_data(self):
+        """
+        Returns the underlying map. Only use this in testing.
+        """
+        return self.bucket
+
+    @property
     def complete_since_tid(self):
         if self._complete_since_tid == -1:
             return None
-        return self.complete_since_tid
+        return self._complete_since_tid
 
     cpdef verify(self, bint initial=True):
         # Check that our constraints are met
@@ -160,9 +166,10 @@ cdef class _TransactionRangeObjectIndex:
             self._complete_since_tid = bucket._complete_since_tid
 
     # These raise ValueError if the map is empty
-    cpdef TID_t max_stored_tid(self):
+    cpdef TID_t max_stored_tid(self) except -1:
         return self.bucket.maxValue()
-    cpdef TID_t min_stored_tid(self):
+
+    cpdef TID_t min_stored_tid(self) except -1:
         return self.bucket.minValue()
 
 
@@ -192,6 +199,9 @@ cdef class _TransactionRangeObjectIndex:
 
     cdef bint contains(self, OID_t key) except -1:
         return self.bucket.contains(key)
+
+    cpdef items(self):
+        return self.bucket.items()
 
     cdef TID_t get(self, OID_t key) except -1:
         if self.bucket.contains(key):
@@ -377,12 +387,12 @@ cdef class _ObjectIndex:
         }
 
     cdef size_t key_count(self):
-        cdef VectorOidType keys
         cdef _TransactionRangeObjectIndex m
-        multiunion_into([
+        cdef size_t result
+        result = multiunion_into([
             m.bucket for m in self.maps
-        ], &keys)
-        return keys.size()
+        ], NULL)
+        return result
 
     def __getitem__(self, OID_t oid):
         for mapping in self.c_maps:
@@ -433,6 +443,16 @@ cdef class _ObjectIndex:
             assert mapping._complete_since_tid == -1 or tid <= mapping._complete_since_tid
             mapping.set(oid, tid)
             break
+
+    def as_dict(self):
+        result = {}
+        it = self.c_maps.rbegin()
+        end = self.c_maps.rend()
+        while it != end:
+            m = <_TransactionRangeObjectIndex>deref(it)
+            preincr(it)
+            result.update(m.items())
+        return result
 
     @property
     def total_size(self):
@@ -627,6 +647,15 @@ cdef class _ObjectIndex:
 
     def get_second_oldest_transaction(self):
         return self.maps[-2]
+
+    def get_newest_transaction(self):
+        return self.maps[0]
+
+    def get_oldest_transaction(self):
+        return self.maps[-1]
+
+    def get_transactions_from(self, ix):
+        return self.maps[ix:]
 
     def remove_oldest_transaction_and_collect_invalidations(self, OidTidMap to_delete):
         """

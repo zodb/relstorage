@@ -10,8 +10,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
-
 from relstorage._rs_types cimport OID_t
 from relstorage._rs_types cimport TID_t
 
@@ -122,9 +120,7 @@ cdef class OidSet:
 
     def __init__(self, oids=None):
         if oids:
-            # TODO: Optimize for oids being an OidSet?
-            for k in oids:
-                self._set.insert(k)
+            self.update(oids)
 
     cpdef keeping_only_keys_in_map(self, OidTidMap map):
         # most likely, the map is smaller than the set,
@@ -144,6 +140,19 @@ cdef class OidSet:
     cdef void c_add(self, OID_t oid) except +:
         self._set.insert(oid)
 
+    cpdef update(self, data):
+        if isinstance(data, OidSet):
+            self.update_from_other_set(<OidSet>data)
+        else:
+            for k in data:
+                self._set.insert(k)
+
+    cdef void update_from_other_set(self, OidSet other) except +:
+        # I'd like to use copy() with inserter(self._set), but
+        # I can't get that to work with Cython
+        for k in other._set:
+            self._set.insert(k)
+
     def __len__(self):
         return self._set.size()
 
@@ -157,8 +166,7 @@ cdef class OidTidMap:
     def __init__(self, data=()):
         self._map.clear()
         if data:
-            for k, v in data:
-                self._map[k] = v
+            self.update(data)
 
     def __len__(self):
         return self.size()
@@ -170,6 +178,8 @@ cdef class OidTidMap:
         self.set(k, v)
 
     cdef int set(self, OID_t key, TID_t value) except -1:
+        if key < 0 or value < 0:
+            raise TypeError((key, value))
         self._map[key] = value
         return 1
 
@@ -178,6 +188,12 @@ cdef class OidTidMap:
         if search != self._map.end():
             return deref(search).second
         raise KeyError(key)
+
+    def get(self, key, default=None):
+        search = self._map.find(key)
+        if search != self._map.end():
+            return deref(search).second
+        return default
 
     def __delitem__(self, OID_t key):
         search = self._map.find(key)
@@ -193,10 +209,14 @@ cdef class OidTidMap:
         return search != self._map.end()
 
     cpdef update(self, data):
+        cdef OID_t k
+        cdef TID_t v
         if isinstance(data, OidTidMap):
             self.update_from_other_map(<OidTidMap>data)
         else:
             for k, v in data:
+                if k < 0 or v < 0:
+                    raise TypeError((k, v))
                 self._map[k] = v
 
     cdef void update_from_other_map(self, OidTidMap other) except +:
@@ -221,14 +241,20 @@ cdef class OidTidMap:
         return result
 
     def values(self):
-        return [x.second for x in self._map]
+        for pair in self._map:
+            yield pair.second
 
     def items(self):
-        return [(x.first, x.second) for x in self._map]
-
-    def iteritems(self):
         for pair in self._map:
             yield pair
+
+    def keys(self):
+        for pair in self._map:
+            yield pair.first
+
+    def __iter__(self):
+        for pair in self._map:
+            yield pair.first
 
     cpdef TID_t minValue(self) except -1:
         cdef TID_t result
@@ -367,11 +393,12 @@ cdef class OidTidMap:
 
 
 
-cdef void multiunion_into(maps, VectorOidType* result) except +:
+cdef size_t multiunion_into(maps, VectorOidType* result) except +:
     cdef VectorOidType all_oids
     cdef VectorOidType sorted_no_dups
     cdef OidTidMap a_map
     cdef size_t i
+    cdef size_t how_many = 0
     # Get them all in sorted order
     # Reserving space the size of the map in all_oids takes the simple copy loop from
     # 596us up to 305ms!
@@ -381,7 +408,8 @@ cdef void multiunion_into(maps, VectorOidType* result) except +:
         #all_oids.reserve(all_oids.size() + a_map._map.size())
         transform(a_map._map.begin(), a_map._map.end(), back_inserter(all_oids), get_key)
     # Sorting takes 2.5ms
-    how_many = sort_int_nodups(all_oids.data(), all_oids.size())
+    if all_oids.size():
+        how_many = sort_int_nodups(all_oids.data(), all_oids.size())
     # But making the set, either way, takes 20ms!
     #for i in range(how_many):
     #    result._set.insert(all_oids[i])
@@ -390,9 +418,11 @@ cdef void multiunion_into(maps, VectorOidType* result) except +:
     #     all_oids.begin(), all_oids.begin() + how_many)
     # Copying and returning a list takes 14ms, of which only 1ms or so of that
     # is the copy! Mostly its converting.
-    result.reserve(how_many)
-    for i in range(how_many):
-        result.push_back(all_oids[i])
+    if result is not NULL and how_many:
+        result.reserve(how_many)
+        for i in range(how_many):
+            result.push_back(all_oids[i])
+    return how_many
 
 
 # Local Variables:

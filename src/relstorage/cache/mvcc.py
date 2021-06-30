@@ -25,8 +25,8 @@ from perfmetrics import statsd_client
 
 from zope.interface import implementer
 
-from relstorage._compat import OID_TID_BUCKET_TYPE as OidTMap
-from relstorage._compat import OID_SET_TYPE as OidSet
+from relstorage._inthashmap import OidTidMap as OidTMap
+from relstorage._inthashmap import OidSet
 from relstorage._compat import iteroiditems
 
 from relstorage._util import log_timed
@@ -41,12 +41,7 @@ from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
 from ._objectindex import _ObjectIndex
 
-from relstorage._inthashmap import OidTidMap as OidTMap
-from relstorage._inthashmap import OidSet
 
-# OidTMap_multiunion = OidTMap.multiunion
-# OidTMap_intersection = OidSet.keeping_only_keys_in_map
-# OidTMap_difference = OidTMap.difference
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -489,7 +484,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             self.complete_since_tid or max_hvt
         )
         local_client = cache.local_client
-        return local_client.save(object_index=self.object_index.maps[0],
+        return local_client.save(object_index=self.object_index.get_newest_transaction(),
                                  checkpoints=checkpoints, **save_args)
 
     def restore(self, adapter, local_client, timeout=None):

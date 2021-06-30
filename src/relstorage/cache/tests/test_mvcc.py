@@ -24,18 +24,36 @@ from relstorage.tests import MockAdapter
 from relstorage.options import Options
 from relstorage.cache import interfaces
 from relstorage.cache import mvcc
+from relstorage.cache import _objectindex as objectindex
 
 from . import LocalClient
 
+# We get this for _TransactionRangeObjectIndex.raw_data;
+# that's an _inthashmap.OidTidMap, which *is* subscriptable
+# pylint:disable=unsubscriptable-object
+
 class MockObjectIndex(object):
 
-    maps = ()
+    mock_maps = ()
     detached = False
     highest_visible_tid = None
     complete_since_tid = None
 
     def __setitem__(self, k, v):
         raise AttributeError
+
+    def get_newest_transaction(self):
+        return self.mock_maps[0]
+
+    @property
+    def depth(self):
+        return len(self.mock_maps)
+
+    def get_oldest_transaction(self):
+        return self.mock_maps[-1]
+
+    def get_transactions_from(self, ix):
+        return self.mock_maps[ix:]
 
 class MockViewer(object):
 
@@ -217,7 +235,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             self.polled_tid = poll_num
             self.polled_changes = self.expected_poll_result = [(oid, tid)]
             self.do_poll()
-            self.assertLength(self.viewer.object_index.maps, 1)
+            self.assertEqual(self.viewer.object_index.depth, 1)
             self.assertEqual(self.coord.minimum_highest_visible_tid, poll_num)
             self.assertEqual(self.coord.maximum_highest_visible_tid, poll_num)
             # Our completion is our last poll.
@@ -256,7 +274,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             self.polled_tid = poll_num
             self.polled_changes = self.expected_poll_result = [(oid, tid)]
             self.do_poll()
-            self.assertLength(self.viewer.object_index.maps, poll_num)
+            self.assertEqual(self.viewer.object_index.depth, poll_num)
             # The max keeps going up.
             self.assertEqual(self.coord.maximum_highest_visible_tid, poll_num)
             # The min stays pinned
@@ -267,8 +285,8 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         # At the end, the index is not the same.
         self.assertIsNot(self.viewer.object_index, second_viewer.object_index)
         # But the original map still is.
-        self.assertIs(self.viewer.object_index.maps[-1],
-                      second_viewer.object_index.maps[0])
+        self.assertIs(self.viewer.object_index.get_oldest_transaction(),
+                      second_viewer.object_index.get_newest_transaction())
 
     def test_poll_many_times_vacuums_several_viewers(self):
         # A viewer that keeps moving forward, and a viewer that
@@ -300,7 +318,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             self.polled_tid = poll_num
             self.polled_changes = self.expected_poll_result = [(oid, tid)]
             self.do_poll()
-            self.assertLength(self.viewer.object_index.maps, poll_num)
+            self.assertEqual(self.viewer.object_index.depth, poll_num)
             # The max keeps going up.
             self.assertEqual(self.coord.maximum_highest_visible_tid, poll_num)
             # The min stays pinned
@@ -323,13 +341,13 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             poll_for_poll_num(poll_num)
 
         # All three share the original map
-        self.assertIs(self.viewer.object_index.maps[-1],
-                      second_viewer.object_index.maps[0])
-        self.assertIs(third_viewer.object_index.maps[-1],
-                      second_viewer.object_index.maps[0])
+        self.assertIs(self.viewer.object_index.get_oldest_transaction(),
+                      second_viewer.object_index.get_newest_transaction())
+        self.assertIs(third_viewer.object_index.get_oldest_transaction(),
+                      second_viewer.object_index.get_newest_transaction())
         # The second and third share the back 20 maps
-        new_maps = self.viewer.object_index.maps[10:]
-        back_maps = third_viewer.object_index.maps[:]
+        new_maps = self.viewer.object_index.get_transactions_from(10)
+        back_maps = third_viewer.object_index.get_transactions_from(0)
         self.assertEqual(new_maps, back_maps)
 
         # Change settings: limit the depth
@@ -343,7 +361,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertTrue(second_viewer.detached)
         # And the maps have been combined, back to the third_viewer
         # 12 = third_viewer + 10 intermediates + most recent poll
-        self.assertLength(self.viewer.object_index.maps, 12)
+        self.assertEqual(self.viewer.object_index.depth, 12)
 
         # polling again will drop the third viewer and shrink everything up.
         poll_num += 1
@@ -352,7 +370,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.do_poll()
 
         self.assertTrue(third_viewer.detached)
-        self.assertLength(self.viewer.object_index.maps, 1)
+        self.assertEqual(self.viewer.object_index.depth, 1)
 
     def test_poll_produces_gap_vacuum(self):
         # TIDs do not always strictly go up; if there's a delay polling,
@@ -440,7 +458,6 @@ class TestMVCCDatabaseCorrdinator(TestCase):
                 # pylint:disable=signature-differs
                 try:
                     for x in RowBatcher.select_from(self, *args, **kwargs):
-                        print("Yielding", x)
                         yield x
                 except AggregateOperationTimeoutError as ex:
                     MockRowBatcher.ex = ex
@@ -510,7 +527,7 @@ class TestTransactionRangeObjectIndex(TestCase):
                  highest_visible_tid,
                  complete_since_tid,
                  data):
-        return mvcc._TransactionRangeObjectIndex(
+        return objectindex._TransactionRangeObjectIndex(
             highest_visible_tid,
             complete_since_tid,
             data)
@@ -555,8 +572,8 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map.verify(initial=False)
         self.assertEqual(old_map.complete_since_tid, new_map.complete_since_tid)
         self.assertEqual(old_map.highest_visible_tid, new_map.highest_visible_tid)
-        self.assertEqual(old_map.bucket[1], 2)
-        self.assertEqual(old_map.bucket[2], 2)
+        self.assertEqual(old_map.raw_data[1], 2)
+        self.assertEqual(old_map.raw_data[2], 2)
 
     def test_merge_same_tid(self):
         # A complete map
@@ -572,9 +589,9 @@ class TestTransactionRangeObjectIndex(TestCase):
         old_map.verify(initial=False)
         self.assertEqual(old_map.complete_since_tid, new_map.complete_since_tid)
         self.assertEqual(old_map.highest_visible_tid, new_map.highest_visible_tid)
-        self.assertEqual(old_map.bucket[1], 3)
-        self.assertEqual(old_map.bucket[2], 1)
-        self.assertEqual(old_map.bucket[3], 2)
+        self.assertEqual(old_map.raw_data[1], 3)
+        self.assertEqual(old_map.raw_data[2], 1)
+        self.assertEqual(old_map.raw_data[3], 2)
 
     def test_can_hold_old_data(self):
         # Complete maps are only complete over their range:
@@ -587,26 +604,27 @@ class TestTransactionRangeObjectIndex(TestCase):
         new_map.verify(initial=False)
 
     def test_merge_older_not_modify_older(self):
+        # pylint:disable=no-member
         orig = self._makeOne(2, complete_since_tid=None, data=())
         orig[2] = 1
         orig[1] = 1
         old_map = self._makeOne(3, complete_since_tid=2, data=((1, 3),))
 
         old_map.merge_older_tid(orig)
-        self.assertEqual(dict(orig.bucket.items()), {1: 1, 2: 1})
+        self.assertEqual(dict(orig.raw_data.items()), {1: 1, 2: 1})
         # The merged map has both
-        self.assertEqual(dict(old_map.bucket.items()), {1: 3, 2: 1})
+        self.assertEqual(dict(old_map.raw_data.items()), {1: 3, 2: 1})
 
 
 class TestObjectIndex(TestCase):
 
     def _makeOne(self, highest_visible_tid=1, data=()):
-        return mvcc._ObjectIndex(highest_visible_tid, data=data)
+        return objectindex._ObjectIndex(highest_visible_tid, data=data)
 
     def test_ctor_empty(self):
         ix = self._makeOne()
-        self.assertEqual(1, len(ix.maps))
-        self.assertIsInstance(ix.maps[0], mvcc._TransactionRangeObjectIndex)
+        self.assertEqual(1, ix.depth)
+        self.assertIsInstance(ix.get_newest_transaction(), objectindex._TransactionRangeObjectIndex)
         self.assertEqual(1, ix.highest_visible_tid)
         self.assertEqual(1, ix.maximum_highest_visible_tid)
         self.assertEqual(1, ix.minimum_highest_visible_tid)
@@ -645,7 +663,7 @@ class TestObjectIndex(TestCase):
         initial_tid = 1
         # Initially incomplete.
         ix = self._makeOne(highest_visible_tid=initial_tid)
-        initial_map = ix.maps[0]
+        initial_map = ix.get_newest_transaction()
 
         # cache some data.
         oid = 1
@@ -667,7 +685,7 @@ class TestObjectIndex(TestCase):
         # and we can't do that.
         self.assertIsNot(ix2, ix)
         del ix
-        self.assertIsNot(ix2.maps[0], initial_map)
+        self.assertIsNot(ix2.get_newest_transaction(), initial_map)
         # Verifies.
         ix2.verify()
         self.assertEqual(ix2.maximum_highest_visible_tid, new_polled_tid)
@@ -676,7 +694,7 @@ class TestObjectIndex(TestCase):
 
         # Incomplete data is preserved, and
         # Complete incoming data is visible
-        self.assertEqual(dict(ix2), {
+        self.assertEqual(ix2.as_dict(), {
             oid: new_polled_tid,
             oid2: initial_tid,
             oid3: new_polled_tid
@@ -703,7 +721,7 @@ class TestObjectIndex(TestCase):
                                     complete_since_tid=initial_tid, changes=())
         # We didn't actually change the complete_since value, because without
         # changes we can't actually be sure we're complete.
-        self.assertEqual(ix.maps[-1].complete_since_tid, None)
+        self.assertEqual(ix.get_oldest_transaction().complete_since_tid, None)
 
     def test_polled_same_tid_back_complete(self):
         initial_tid = 2

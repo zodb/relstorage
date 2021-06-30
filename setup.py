@@ -154,7 +154,7 @@ setup(
                     'src/relstorage/cache/cache.pyx',
                     'src/relstorage/cache/c_cache.cpp',
                 ],
-                include_dirs=['include'],
+                include_dirs=['include', 'src/relstorage'],
                 # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
                 # /EHsc: `s`: enable stack unwinding, catch C++ exceptions in catch(...)
                 #        `c`: extern C functions never throw C++ exceptions.
@@ -177,7 +177,7 @@ setup(
                 sources=[
                     'src/relstorage/cache/_objectindex.pyx',
                 ],
-                include_dirs=['include'],
+                include_dirs=['include', 'src/relstorage'],
                 extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
             ),
         ],

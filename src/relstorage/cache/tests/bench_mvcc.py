@@ -34,7 +34,7 @@ class BenchPoller(object):
 
     OBJ_PER_TXN = 250
     SAME_TID = True
-    REPLACE_OBJECTS = True
+    REPLACE_OBJECTS = False
 
     def get_current_tid(self, cursor):
         cursor.current_tid += 1
