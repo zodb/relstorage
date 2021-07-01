@@ -138,10 +138,10 @@ else:
 # is generally faster. We use it everywhere.
 ###
 
-#from relstorage._inthashmap import OidTidMap as OID_TID_MAP_TYPE
-#from relstorage._inthashmap import OidSet as OID_SET_TYPE
-OID_SET_TYPE = BTrees.family64.UU.TreeSet
-OID_TID_MAP_TYPE = BTrees.family64.UU.BTree
+from relstorage._inthashmap import OidTidMap as OID_TID_MAP_TYPE
+from relstorage._inthashmap import OidSet as OID_SET_TYPE
+#OID_SET_TYPE = BTrees.family64.UU.TreeSet
+#OID_TID_MAP_TYPE = BTrees.family64.UU.BTree
 
 if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
     # For BTree and Tree set objects, if you subclass you can define two attributes

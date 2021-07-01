@@ -114,7 +114,8 @@ class TestSet(TestOidSet):
 
 class TestDict(TestCase):
 
-    ALLOWS_NEGATIVE = True
+    SUPPORTS_EQUALITY = True
+    SUPPORTS_HASHING = False
 
     def _makeOne(self, *args):
         return dict(*args)
@@ -129,7 +130,8 @@ class TestDict(TestCase):
         self.assertNotIn(42, s)
         self.assertEqual(list(s), [])
         self.assertEqual(s, s)
-        self.assertEqual(s, self._makeOne())
+        if self.SUPPORTS_EQUALITY:
+            self.assertEqual(s, self._makeOne())
         self.assertNotEqual(s, self)
         self.assertEqual(list(s.values()), [])
         self.assertEqual(list(s.items()), [])
@@ -141,6 +143,8 @@ class TestDict(TestCase):
         return s
 
     def test_not_hashable(self):
+        if self.SUPPORTS_HASHING:
+            self.skipTest("Supports hashing")
         s = self._makeOne()
         with self.assertRaises(TypeError):
             hash(s)
@@ -228,6 +232,35 @@ class TestDict(TestCase):
         self.assertEqual(s[42], 24)
         self.assertEqual(s[24], 42)
 
+    def test_views_can_iterate_many_times(self):
+        s = self._makeOne()
+        s.update({42: 24, 24: 42})
+
+        keys = s.keys()
+        self.assertEqual(sorted(keys), [24, 42])
+        self.assertEqual(sorted(keys), [24, 42])
+        self.assertEqual(sorted(keys), [24, 42])
+
+        values = s.values()
+        self.assertEqual(sorted(values), [24, 42])
+        self.assertEqual(sorted(values), [24, 42])
+        self.assertEqual(sorted(values), [24, 42])
+
+        items = s.items()
+        self.assertEqual(sorted(items), [(24, 42), (42, 24)])
+        self.assertEqual(sorted(items), [(24, 42), (42, 24)])
+        self.assertEqual(sorted(items), [(24, 42), (42, 24)])
+
+
+class TestBTreeMap(TestDict):
+    SUPPORTS_EQUALITY = False
+    SUPPORTS_HASHING = True
+    def _makeOne(self, *args):
+        import BTrees
+        return BTrees.family64.UU.BTree(*args)
+
+    def test_update_from_generator(self):
+        self.skipTest("BTrees cant use a generator")
 
 class TestOidTidMap(TestDict):
     # We want to be sure to be API compatible

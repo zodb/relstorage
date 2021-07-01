@@ -103,6 +103,42 @@ cdef class OidSet:
             return NotImplemented
         return self._set == (<OidSet>other)._set
 
+@cython.freelist(1000)
+@cython.final
+cdef class _OidTidMapKeysView:
+    cdef OidTidMap _parent
+
+    def __cinit__(self, OidTidMap parent):
+        self._parent = parent
+
+    def __iter__(self):
+        for pair in self._parent._map:
+            yield pair.first
+
+@cython.freelist(1000)
+@cython.final
+cdef class _OidTidMapValuesView:
+    cdef OidTidMap _parent
+
+    def __cinit__(self, OidTidMap parent):
+        self._parent = parent
+
+    def __iter__(self):
+        for pair in self._parent._map:
+            yield pair.second
+
+@cython.freelist(1000)
+@cython.final
+cdef class _OidTidMapItemsView:
+    cdef OidTidMap _parent
+
+    def __cinit__(self, OidTidMap parent):
+        self._parent = parent
+
+    def __iter__(self):
+        for pair in self._parent._map:
+            yield pair
+
 
 @cython.final
 cdef class OidTidMap:
@@ -195,16 +231,13 @@ cdef class OidTidMap:
         return result
 
     def values(self):
-        for pair in self._map:
-            yield pair.second
+        return _OidTidMapValuesView.__new__(_OidTidMapValuesView, self)
 
     def items(self):
-        for pair in self._map:
-            yield pair
+        return _OidTidMapItemsView.__new__(_OidTidMapItemsView, self)
 
     def keys(self):
-        for pair in self._map:
-            yield pair.first
+        return _OidTidMapKeysView.__new__(_OidTidMapKeysView, self)
 
     def __iter__(self):
         for pair in self._map:
