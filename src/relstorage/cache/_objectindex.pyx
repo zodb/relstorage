@@ -24,7 +24,7 @@ from relstorage._inthashmap cimport OidTidMap
 from relstorage._inthashmap cimport MapType
 from relstorage._inthashmap cimport MapSizeType
 from relstorage._inthashmap cimport VectorOidType
-from relstorage._inthashmap cimport multiunion_into
+from relstorage._inthashmap cimport multiunion
 
 from zope.interface import classImplements
 
@@ -388,11 +388,9 @@ cdef class _ObjectIndex:
 
     cdef size_t key_count(self):
         cdef _TransactionRangeObjectIndex m
-        cdef size_t result
-        result = multiunion_into([
+        return multiunion([
             m.bucket for m in self.maps
-        ], NULL)
-        return result
+        ]).size()
 
     def __getitem__(self, OID_t oid):
         for mapping in self.c_maps:

@@ -16,9 +16,11 @@ from __future__ import division
 from __future__ import print_function
 
 # pragma: no cover
+import sys
 
 from relstorage.cache.mvcc import MVCCDatabaseCoordinator
 from relstorage._mvcc import DetachableMVCCDatabaseViewer
+from relstorage._compat import perf_counter
 
 class BenchConnection(object):
     pass
@@ -101,10 +103,34 @@ def populate():
     print(mvcc.stats())
     print()
 
-if __name__ == '__main__':
+def bench_multiunion_no_overlap(loops):
+    from relstorage._inthashmap import OidTidMap
+    # 2000 maps of 250 unique oids
+    # 29.3ms with the BTree sorting
+    # 25.2ms with the stdlib sort/unique/erase approach, but copying into a new result
+    #   vector.
+    # 24.7ms when returning the vector in place.
+    # Most of the time here is probably in the final C++->Python conversion.
+    i = 0
+    maps = []
+    for _map_num in range(2000):
+        x = OidTidMap()
+        maps.append(x)
+        for _ in range(250):
+            i += 1
+            x[i] = i
+
+    duration = 0
+    for _ in range(loops):
+        begin = perf_counter()
+        OidTidMap._multiunion(maps)
+        duration += perf_counter() - begin
+
+    return duration
+
+def run_populate():
     import os
     import logging
-    from relstorage._compat import perf_counter
     logging.basicConfig(level=logging.DEBUG)
     print("PID", os.getpid())
     begin = perf_counter()
@@ -143,3 +169,16 @@ if __name__ == '__main__':
     # altogether in favor of converting to a Python set(),
     # the small case drops to 33s, while the large case
     # clocks in at a massive 209s.
+
+def main():
+    if len(sys.argv) == 2 and sys.argv[-1] == 'populate':
+        run_populate()
+    else:
+        import pyperf
+        runner = pyperf.Runner()
+        runner.bench_time_func(
+            'OidTidMap._multiunion distinct', bench_multiunion_no_overlap,
+        )
+
+if __name__ == '__main__':
+    main()
