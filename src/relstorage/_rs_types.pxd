@@ -9,5 +9,9 @@ cdef extern from "_rs_types.h":
     ctypedef int64_t TID_t
     ctypedef int64_t OID_t
 
+cdef extern from "_rs_types.h" namespace "relstorage":
+    cdef cppclass PythonAllocator[T]:
+        pass
+
 cdef extern from * namespace "boost":
     T& move[T](T&)

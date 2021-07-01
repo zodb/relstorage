@@ -20,6 +20,7 @@ from libcpp.iterator cimport back_inserter
 
 from relstorage._rs_types cimport OID_t
 from relstorage._rs_types cimport TID_t
+from relstorage._rs_types cimport PythonAllocator
 from relstorage._inthashmap cimport OidTidMap
 from relstorage._inthashmap cimport MapType
 from relstorage._inthashmap cimport MapSizeType
@@ -33,6 +34,9 @@ from relstorage._compat import IN_TESTRUNNER
 from relstorage.interfaces import IMVCCDatabaseViewer
 
 cdef bint DEBUG = __debug__ and IN_TESTRUNNER
+
+ctypedef PyObject* PyObjectPtr
+ctypedef PythonAllocator[PyObjectPtr] PyObjectPtrAlloc
 
 @cython.freelist(1000)
 @cython.final
@@ -349,7 +353,7 @@ cdef class _ObjectIndex:
     # Py_INCREF and Py_DECREF operation. Casting to <PyObject *>
     # creates a borrowed reference, leaving the refcount unchanged."
     # We store borrowed references here.
-    cdef vector[PyObject*] c_maps
+    cdef vector[PyObjectPtr, PyObjectPtrAlloc] c_maps
 
 
     def __init__(self, highest_visible_tid, complete_since_tid=None, data=()):
@@ -623,7 +627,7 @@ cdef class _ObjectIndex:
         ID for the given ``oid``.
         """
         cdef OidTidMap changes = OidTidMap()
-        cdef vector[PyObject*] change_dicts
+        cdef vector[PyObjectPtr, PyObjectPtrAlloc] change_dicts
         cdef _TransactionRangeObjectIndex mapping
 
         for ptr in self.c_maps:

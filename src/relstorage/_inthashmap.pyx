@@ -283,8 +283,16 @@ cdef class OidTidMap:
         # it seems that most of the time is spent converting
         # from C++ to Python. However, returning the vector and letting
         # Cython handle the conversion is faster than creating
-        # a OidSet from the vector (25ms vs 73ms)
-        return multiunion(maps)
+        # a OidSet from the vector (25ms vs 73ms).
+        # However, since we added the PythonAllocator to the template,
+        # we can't use the default conversion; Cython doesn't get the
+        # template arguments right. There seems to be very little difference,
+        # though, with the list comprehension.
+        return [
+            x for x in multiunion(maps)
+        ]
+
+
 
 
 cdef VectorOidType multiunion(maps) except +:

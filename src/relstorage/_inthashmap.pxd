@@ -9,6 +9,7 @@ from libcpp.vector cimport vector
 
 from relstorage._rs_types cimport OID_t
 from relstorage._rs_types cimport TID_t
+from relstorage._rs_types cimport PythonAllocator
 
 
 # XXX: The unordered_set/unordered_map definitions are just copied
@@ -156,14 +157,54 @@ cdef extern from "_inthashmap.h" namespace "boost" nogil:
         size_t bucket_size(size_t)
         size_t bucket(const T&)
 
+# The allocator is the last argument in the template, so we have to
+# repeat a lot of the defaults from the headers to use it.
+cdef extern from *:
+    """
+    typedef boost::hash<OID_t> Hasher;
+    typedef std::equal_to<OID_t> Comparer;
+    typedef relstorage::PythonAllocator<std::pair<OID_t, TID_t> > MapAlloc;
+    typedef relstorage::PythonAllocator<OID_t> SetAlloc;
 
-ctypedef unordered_map[OID_t, TID_t] MapType
+    typedef boost::unordered_map<
+        OID_t, TID_t,
+        Hasher,
+        Comparer,
+        MapAlloc > MapType;
+
+    typedef boost::unordered_set<
+        OID_t,
+        Hasher,
+        Comparer,
+        SetAlloc > SetType;
+
+    typedef MapType* MapTypePtr;
+    typedef relstorage::PythonAllocator<MapTypePtr> MapTypePtrAlloc;
+
+    typedef std::vector<MapTypePtr, MapTypePtrAlloc > VectorMapPtrType;
+    """
+    cppclass hash[T]:
+        pass
+    ctypedef hash[OID_t] Hasher
+    cppclass equal_to[T]:
+        pass
+    ctypedef equal_to[OID_t] Comparer
+    ctypedef PythonAllocator[pair[OID_t, TID_t]] MapAlloc
+    ctypedef PythonAllocator[OID_t] SetAlloc
+
+    ctypedef unordered_map[OID_t, TID_t, Hasher, Comparer, MapAlloc] MapType
+    ctypedef unordered_set[OID_t, Hasher, Comparer, SetAlloc] SetType
+
+    ctypedef MapType* MapTypePtr
+    ctypedef PythonAllocator[MapTypePtr] MapTypePtrAlloc
+    ctypedef vector[MapTypePtr, MapTypePtrAlloc] VectorMapPtrType
+
+
 ctypedef MapType.size_type MapSizeType
-ctypedef unordered_set[OID_t] SetType
 
-ctypedef vector[OID_t] VectorOidType
+ctypedef vector[OID_t, PythonAllocator[OID_t]] VectorOidType
 ctypedef VectorOidType.iterator VectorOidIterator
-ctypedef vector[MapType*] VectorMapPtrType
+
 
 @cython.final
 @cython.freelist(1000)
