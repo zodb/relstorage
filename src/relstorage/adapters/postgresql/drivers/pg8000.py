@@ -40,7 +40,7 @@ __all__ = [
 
 class _tuple_deque(deque):
 
-    def append(self, row): # pylint:disable=arguments-differ
+    def append(self, row): # pylint:disable=arguments-renamed
         deque.append(self, tuple(row))
 
 class PG8000Compiler(Compiler):

@@ -63,7 +63,7 @@ class Copy(object):
     def copyTransactionsFrom(self, other):
         # Just the interface, not the attribute, in case we have a
         # partial proxy.
-        other_has_record_iternext = IRecordIter.providedBy(other)
+        other_has_record_iternext = IRecordIter.providedBy(other) # pylint:disable=no-value-for-parameter
 
         copier_factory = _HistoryFreeCopier
         if self.tpc.keep_history or not other_has_record_iternext:

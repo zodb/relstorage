@@ -181,7 +181,7 @@ class Compiler(object):
         # Deduce the datatypes based on the types of the columns
         # we're sending as params.
         root = self.root
-        if ITypedParams.providedBy(root):
+        if ITypedParams.providedBy(root): # pylint:disable=no-value-for-parameter
             # Don't call the interface to adapt; that uses adapter
             # hooks, which may be persistent objects and thus result
             # in calling back into this method (if the query we're

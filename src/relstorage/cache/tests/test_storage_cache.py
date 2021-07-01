@@ -290,9 +290,6 @@ class StorageCacheTests(TestCase):
         c.after_tpc_finish(tid, temp_storage)
         self.assertEqual(data, {})
 
-    def __not_called(self):
-        self.fail("Should not be called")
-
     def test_instances_share_polling_state(self):
         child = self._makeOne()
         self.assertEqual(1, len(self._instances))

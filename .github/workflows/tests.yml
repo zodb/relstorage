@@ -433,9 +433,12 @@ jobs:
       - name: Lint
         # We only need to do this on one version, and it should be Python 3, because
         # pylint has stopped updating for Python 2.
+        # We used to pass ``limit-inference-results=1``, thinking that
+        # sped things up. It doesn't actually seem to, and it does
+        # cause a bunch of false positives, at least in 2.9.3.
         run: |
           pip install -U pylint
-          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
+          python -m pylint --rcfile=.pylintrc relstorage -f parseable -r n
 
   manylinux_x86_64:
     runs-on: ubuntu-latest

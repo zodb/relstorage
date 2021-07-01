@@ -93,7 +93,7 @@ dummy-variables-rgx=_.*
 # system, and so shouldn't trigger E1101 when accessed. Python regular
 # expressions are accepted.
 # gevent: this is helpful for py3/py2 code.
-generated-members=exc_clear
+generated-members=exc_clear,cache_checker,adapter
 
 # List of classes names for which member attributes should not be checked
 # (useful for classes with attributes dynamically set). This supports can work

@@ -49,7 +49,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return dsn
 
     @metricmethod
-    def open(self, isolation=None, deferrable=False, read_only=False,
+    def open(self, isolation=None, read_only=False, deferrable=False,
              replica_selector=None, application_name=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ

@@ -84,7 +84,7 @@ class Columns(object):
 
     def has_bind_param(self):
         return any(
-            IBindParam.providedBy(c)
+            IBindParam.providedBy(c) # pylint:disable=no-value-for-parameter
             for c in self._columns
         )
 

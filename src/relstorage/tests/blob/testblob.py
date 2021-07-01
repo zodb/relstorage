@@ -206,6 +206,7 @@ class RecoveryBlobStorage(BlobTestBase,
     # Requires a setUp() that creates a self._dst destination storage
     def testSimpleBlobRecovery(self):
         self.assertTrue(
+            # pylint:disable=no-value-for-parameter
             ZODB.interfaces.IBlobStorageRestoreable.providedBy(
                 self._storage)
             )

@@ -71,8 +71,8 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
     def open(self,
              isolation=None,
-             deferrable=False,
              read_only=False,
+             deferrable=False,
              replica_selector=None,
              application_name=None,
              **kwargs):
