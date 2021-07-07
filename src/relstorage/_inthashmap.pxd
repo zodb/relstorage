@@ -220,4 +220,4 @@ cdef class OidTidMap:
     cdef int set(self, OID_t key, TID_t value) except -1
     cdef void update_from_other_map(self, OidTidMap other) except +
 
-cdef VectorOidType multiunion(maps) except +
+cdef VectorOidType multiunion(list maps, size_t total_size) except +

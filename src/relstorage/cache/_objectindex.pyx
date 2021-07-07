@@ -14,7 +14,6 @@ from cython.operator cimport preincrement as preincr
 from cpython cimport PyObject
 
 from libcpp.vector cimport vector
-from libcpp.numeric cimport accumulate
 from libcpp.algorithm cimport copy
 from libcpp.iterator cimport back_inserter
 
@@ -387,14 +386,14 @@ cdef class _ObjectIndex:
             'hvt': self.maximum_highest_visible_tid,
             'min hvt': self.minimum_highest_visible_tid,
             'total OIDS': self.total_size,
-            'unique OIDs': self.key_count(),
+            'unique OIDs': self.unique_key_count(),
         }
 
-    cdef size_t key_count(self):
+    cdef size_t unique_key_count(self):
         cdef _TransactionRangeObjectIndex m
         return multiunion([
             m.bucket for m in self.maps
-        ]).size()
+        ], self.c_total_size()).size()
 
     def __getitem__(self, OID_t oid):
         for mapping in self.c_maps:
@@ -456,16 +455,19 @@ cdef class _ObjectIndex:
             result.update(m.items())
         return result
 
+    cdef MapSizeType c_total_size(self):
+        cdef MapSizeType total_size = 0
+        for ptr in self.c_maps:
+            total_size += (<_TransactionRangeObjectIndex>ptr).size()
+        return total_size
+
     @property
     def total_size(self):
         """
         The total size of this object is the combined length of all maps;
         this is not the same thing as the length of unique keys.
         """
-        cdef MapSizeType result = 0
-        for mapping in self.c_maps:
-            result += (<_TransactionRangeObjectIndex>mapping).size()
-        return result
+        return self.c_total_size()
 
     @property
     def depth(self):
@@ -473,7 +475,7 @@ cdef class _ObjectIndex:
 
     @property
     def highest_visible_tid(self):
-        assert self.c_maps.size() > 0
+        assert not self.c_maps.empty()
         ptr = self.c_maps.front()
         return (<_TransactionRangeObjectIndex>ptr).highest_visible_tid
 
@@ -486,7 +488,7 @@ cdef class _ObjectIndex:
 
     @property
     def minimum_highest_visible_tid(self):
-        assert self.c_maps.size() > 0
+        assert not self.c_maps.empty()
         ptr = self.c_maps.back()
         return (<_TransactionRangeObjectIndex>ptr).highest_visible_tid
 
@@ -495,15 +497,13 @@ cdef class _ObjectIndex:
         # We are complete since the oldest map we have
         # that thinks *it* is complete. This may not necessarily be the
         # last map (but it should be the second to last map!)
-        cdef _TransactionRangeObjectIndex mapping
         it = self.c_maps.rbegin()
         end = self.c_maps.rend()
         while it != end:
             ptr = deref(it)
-            mapping = <_TransactionRangeObjectIndex>ptr
             preincr(it)
 
-            cst = mapping._complete_since_tid
+            cst = (<_TransactionRangeObjectIndex>ptr)._complete_since_tid
             if cst != -1:
                 return cst
 
@@ -694,6 +694,9 @@ cdef class _ObjectIndex:
     cdef void _remove_non_matching_values(self,
                                           _TransactionRangeObjectIndex obsolete_bucket,
                                           OidTidMap to_delete) except +:
+        # XXX: Now that we have a more efficient multiunion,
+        # see what happens if we use that.
+
         # The original algorithm was simple:
         # (1) Pop the old bucket.
         # (2) Union together all the keys in all the remaining buckets
@@ -714,7 +717,6 @@ cdef class _ObjectIndex:
         cdef MapType.iterator obsolete_end
         cdef _TransactionRangeObjectIndex mapping
         cdef bint removed
-
 
 
         # TODO: Drop the GIL for this? We can't cast to Python objects

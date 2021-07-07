@@ -46,6 +46,7 @@ extern "C" {
 
 namespace relstorage {
 
+    // This allocator is stateless; all instances are identical.
     template <class T>
     struct PythonAllocator : public std::allocator<T> {
         // As a reminder: the `delete` expression first executes
@@ -61,6 +62,12 @@ namespace relstorage {
         PythonAllocator(const std::allocator<T> other)
             : std::allocator<T>(other)
         {}
+
+	template <class U>
+	PythonAllocator(const std::allocator<U>& other)
+	    : std::allocator<T>(other)
+	{
+	}
 
         PythonAllocator() : std::allocator<T>() {}
 

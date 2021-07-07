@@ -289,32 +289,46 @@ cdef class OidTidMap:
         # template arguments right. There seems to be very little difference,
         # though, with the list comprehension.
         return [
-            x for x in multiunion(maps)
+            x for x in multiunion(list(maps), 0)
         ]
 
 
 
 
-cdef VectorOidType multiunion(maps) except +:
+cdef VectorOidType multiunion(list maps, size_t total_size) except +:
     """
     Given a Python iterable in *maps* of `OidTidMap` objects,
     compute the union of all the keys (OIDs) found in the maps.
 
     Returns a vector of all the unique keys.
+
+    If *total_size* is not 0, it should be enough space to hold
+    all the keys of each map, e.g., ``sum(len(x) for x in maps)``;
+    but only pass this if you can do so cheaply (without type checks or
+    calling into Python).
     """
     cdef VectorOidType all_oids
     cdef OidTidMap a_map
 
     # This algorithm is based on the BTrees ``multiunion`` algorithm.
-    # Get a list of *all* the keys in arbitrary order,
-    # then sort them in place, ignoring duplicates; then shrink away the
-    # duplicates. It seems that the C++ library does a better job of this
-    # than the BTrees sorters do.
+    # Get a list of *all* the keys in arbitrary order, then sort them
+    # in place, ignoring duplicates; then toss away the duplicates
+    # without compacting the container (because it's likely
+    # temporary). It seems that the C++ library does a better job of
+    # this than the BTrees sorters do.
+
+    # If we reserve space the size of the map in all_oids as we
+    # iterate and transform, we radically slow down this process, by
+    # orders of magnitude. Possibly because we wind up making many
+    # fewer allocations rather than letting the vector grow by bigger
+    # chunks?
+
+    # But we can do better if we reserve the *total* space ahead of time,
+    # which we'll do if the caller can cheaply get it for us.
+    if total_size:
+        all_oids.reserve(total_size + 1)
 
     for a_map in maps:
-        # Reserving space the size of the map in all_oids radically slows
-        # down this process, by orders of magnitude. Possibly because we wind up making
-        # many fewer allocations rather than letting the vector grow by bigger chunks?
         transform(a_map._map.begin(), a_map._map.end(), back_inserter(all_oids), get_key)
 
     if all_oids.size():
