@@ -53,19 +53,9 @@
  */
 
 /** Basic types */
-/* The compiler used for Python 2.7 on Windows doesn't include
-   either stdint.h or cstdint.h. Nor does it understand nullptr or have
-   std::shared_ptr. Sigh. */
-#if defined(_MSC_VER) &&  _MSC_VER <= 1500
-typedef unsigned long long uint64_t;
-typedef signed long long int64_t;
-typedef unsigned int uint32_t;
-#define nullptr NULL
-#else
-#include <cstdint>
-#endif
 #define NDEBUG 1
-#define UNUSED(expr) do { (void)(expr); } while (0)
+#include "../_rs_types.h"
+
 
 #include <string>
 #include <vector>
@@ -86,9 +76,6 @@ typedef unsigned int uint32_t;
 #define RSR_INLINE inline
 #endif
 
-extern "C" {
-    #include "Python.h"
-}
 
 #if defined(PYPY_VERSION) && !defined(RS_REF_STRING)
   // Under PyPy, we don't want to keep PyObject* around.
@@ -117,12 +104,8 @@ extern "C" {
 namespace relstorage {
 namespace cache {
     namespace BIT = boost::intrusive;
+    using relstorage::PythonAllocator;
 
-    typedef int64_t TID_t;
-    // OIDs start at zero and go up from there. We use
-    // a signed type though to distinguish uninitialized values:
-    // they'll be less than 0.
-    typedef int64_t OID_t;
     typedef rs_string Pickle_t;
 
     typedef
@@ -133,53 +116,7 @@ namespace cache {
       GEN_PROBATION = 3
     } generation_num;
 
-    template <class T>
-    struct PythonAllocator : public std::allocator<T> {
-        // As a reminder: the `delete` expression first executes
-        // the destructors, and then it calls the static ``operator delete``
-        // on the type to release the storage. That's what our dispose()
-        // mimics.
-        PythonAllocator(const PythonAllocator& other)
-            : std::allocator<T>()
-        {
-            UNUSED(other);
-        }
 
-        PythonAllocator(const std::allocator<T> other)
-            : std::allocator<T>(other)
-        {}
-
-        PythonAllocator() : std::allocator<T>() {}
-
-        T* allocate(size_t number_objects, const void* hint=0)
-        {
-            UNUSED(hint);
-
-            void* p;
-            if (likely(number_objects == 1))
-                p = PyObject_Malloc(sizeof(T));
-            else
-                p = PyMem_Malloc(sizeof(T) * number_objects);
-            return static_cast<T*>(p);
-        }
-
-        void deallocate(T* t, size_t n)
-        {
-            void* p = t;
-            if (likely(n == 1)) {
-                PyObject_Free(p);
-            }
-            else
-                PyMem_Free(p);
-        }
-
-        // Destroy and deallocate in one step.
-        void dispose(T* other)
-        {
-            this->destroy(other);
-            this->deallocate(other, 1);
-        }
-    };
 
     template<typename StoredType, typename ImplementationType>
     class _StateOperations {

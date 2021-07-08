@@ -86,7 +86,7 @@ class Insert(Query):
             columns_with_params = [
                 target
                 for target, source in zip(targets, sources)
-                if IOrderedBindParam.providedBy(source)
+                if IOrderedBindParam.providedBy(source) # pylint:disable=no-value-for-parameter
             ]
             return dialect.datatypes_for_columns(columns_with_params)
 

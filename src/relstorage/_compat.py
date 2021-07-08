@@ -7,6 +7,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+# pylint:disable=wrong-import-position
+
 import array
 import functools
 import os
@@ -53,9 +55,7 @@ __all__ = [
     "OID_TID_MAP_TYPE",
     'OID_OBJECT_MAP_TYPE',
     'OID_SET_TYPE',
-    'OidTMap_difference',
-    'OidTMap_multiunion',
-    'OidTMap_intersection',
+    'OidObjectMap_max_key',
     'OidList',
 
     'MAX_TID',
@@ -113,6 +113,7 @@ else:
     iterkeys = dict.iterkeys  # pylint:disable=no-member
     itervalues = dict.itervalues  # pylint:disable=no-member
 
+###
 # OID and TID data structures.
 #
 # The cache MVCC implementation depends on the map types being atomic
@@ -123,6 +124,24 @@ else:
 # The map types are rarely large, but they could sometimes be.
 # The set types are more likely to be large (e.g., a set is used to hold
 # all the OIDs we need to poll after reading from a persistent cache).
+#
+# Importantly: The BTree multiunion() operation is by far at its most
+# efficient when they operate on either Set or Bucket objects *not*
+# BTree or TreeSet objects, and not subclasses of any of those. For
+# combining ~700 Maps or Buckets, using Buckets is nearly 50% faster
+# (55s vs 28s).
+#
+# That said, we now have our own Map and Set implementation in
+# ``_inthashmap`` that is based on ``boost::unordered_map``; instead of
+# being ``O(log n)`` for access, it's ``O(1)``. It's based on multiple
+# buckets, so it uses about the same amount of memory as a BTree does, but
+# is generally faster. We use it everywhere.
+###
+
+from relstorage._inthashmap import OidTidMap as OID_TID_MAP_TYPE
+from relstorage._inthashmap import OidSet as OID_SET_TYPE
+#OID_SET_TYPE = BTrees.family64.UU.TreeSet
+#OID_TID_MAP_TYPE = BTrees.family64.UU.BTree
 
 if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
     # For BTree and Tree set objects, if you subclass you can define two attributes
@@ -153,7 +172,7 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
     # Using these values and an OidSet of about 800,000 objects (from
     # a real cache file) results in 12,000 fewer LLSet objects being
     # created, and 2MB less memory being used.
-    class OID_TID_MAP_TYPE(BTrees.family64.UU.BTree):
+    class OID_OBJECT_MAP_TYPE(BTrees.family64.UO.BTree):
         __slots__ = ()
         # Since these are contiguous arrays, there *might* be some
         # benefit in keeping them within a virtual memory page
@@ -169,48 +188,12 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
         # This is definitely 64 bits
         max_leaf_size = 4095 # under 32K, or 8 pages.
 
-    class OID_OBJECT_MAP_TYPE(BTrees.family64.UO.BTree):
-        __slots__ = ()
-        max_internal_size = OID_TID_MAP_TYPE.max_internal_size
-        max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
-
-    class OID_SET_TYPE(BTrees.family64.UU.TreeSet):
-        max_internal_size = OID_TID_MAP_TYPE.max_internal_size
-        max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
-
-    OidTMap_difference = BTrees.family64.UU.difference  # pylint:disable=no-member
-    OidTMap_multiunion = BTrees.family64.UU.multiunion  # pylint:disable=no-member
-    OidTMap_intersection = BTrees.family64.UU.intersection  # pylint:disable=no-member
-    OidSet_difference = OidTMap_difference
-    def OidSet_discard(s, val):
-        try:
-            s.remove(val)
-        except KeyError:
-            pass
-
     def OidObjectMap_max_key(bt):
         if not bt:
             return 0
         return bt.maxKey()
 else:
-    OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
-    OID_SET_TYPE = set
-    def OidTMap_difference(c1, c2):
-        # Must prevent iterating while being changed
-        c1 = dict(c1)
-        return {k: c1[k] for k in set(c1) - set(c2)}
-
-    def OidTMap_multiunion(seq):
-        return set().union(*seq)
-
-    def OidTMap_intersection(c1, c2):
-        return set(c1).intersection(set(c2))
-
-    def OidSet_difference(c1, c2):
-        return set(c1) - set(c2)
-
-    OidSet_discard = set.discard
 
     def OidObjectMap_max_key(mapping):
         if not mapping:

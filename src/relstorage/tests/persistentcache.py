@@ -87,14 +87,22 @@ class PersistentCacheStorageTests(TestCase):
 
     def assert_oid_not_known(self, oid, storage):
         cache = find_cache(storage)
-        self.assertNotIn(oid, cache.object_index or ())
+        __traceback_info__ = oid, cache
+        try:
+            self.assertNotIn(oid, cache.object_index or ())
+        except TypeError:
+            if isinstance(oid, bytes):
+                # OidTidMap
+                oid = bytes8_to_int64(oid)
+                self.assertNotIn(oid, cache.object_index or ())
+            else:
+                raise
 
     def assert_exact_tid_in_oid_index(self, oid, storage, expected_tid=None):
         oid = as_int(oid)
         expected_tid = as_int(expected_tid)
         cache = find_cache(storage)
         index = cache.object_index or cache.polling_state.object_index or ()
-        __traceback_info__ = index.keys()
         self.assertIn(oid, index)
         tid = index[oid]
         if expected_tid:

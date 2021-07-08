@@ -249,8 +249,8 @@ class RelStorage(LegacyMethodsMixin,
             history = History(self._adapter, self._load_connection)
         copy_storage_methods(self, history)
 
-        assert IBlobHelper.providedBy(self.blobhelper)
-        if not INoBlobHelper.providedBy(self.blobhelper):
+        assert IBlobHelper.providedBy(self.blobhelper) # pylint:disable=no-value-for-parameter
+        if not INoBlobHelper.providedBy(self.blobhelper): # pylint:disable=no-value-for-parameter
             interface.alsoProvides(self, ZODB.interfaces.IBlobStorageRestoreable)
 
             loader = BlobLoader(self._load_connection, self.blobhelper)
@@ -419,6 +419,7 @@ class RelStorage(LegacyMethodsMixin,
         return self._adapter.stats.get_db_size()
 
     def registerDB(self, wrapper):
+        # pylint:disable=no-value-for-parameter
         if (ZODB.interfaces.IStorageWrapper.providedBy(wrapper)
                 # Prior to ZODB 5, this would be called by the database itself.
                 # (I wish it would still do that.)

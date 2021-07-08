@@ -1211,6 +1211,7 @@ class GenericRelStorageTests(
             rb.assert_called_with()
 
         self.assertTrue(
+            # pylint:disable=no-value-for-parameter
             IMVCCAfterCompletionStorage.providedBy(self._storage))
 
     def checkConfigureViaZConfig(self):

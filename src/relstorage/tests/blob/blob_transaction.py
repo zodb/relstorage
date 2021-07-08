@@ -177,7 +177,7 @@ class TestBlobTransactionMixin(TestBlobMixin):
 
         transaction.abort()
         conn1.close()
-
+        # pylint:disable=no-value-for-parameter
         if IStorageUndoable.providedBy(self.blob_storage):
             # Whether or not we're using a shared or unshared
             # blob-dir, when we keep history we will have three blob

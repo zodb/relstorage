@@ -48,7 +48,7 @@ class TestConnectionBlobMixin(TestBlobMixin):
         connection2 = self.database.open(transaction_manager=transaction2)
         root = connection2.root()
         blob2 = root['myblob']
-        self.assertTrue(IBlob.providedBy(blob2))
+        self.assertTrue(IBlob.providedBy(blob2)) # pylint:disable=no-value-for-parameter
 
         with blob2.open("r") as f:
             data = f.read()

@@ -11,6 +11,12 @@
   ``max_locks_per_transaction`` and ``max_connections``). Previously,
   this could raise an ``out of shared memory`` error. See
   :issue:`468`.
+- Use C++ hashmaps and sets to store maps and sets of transaction IDs
+  and object IDs instead of using BTrees. The memory footprint is about
+  the same, but the performance is better for common operations (e.g.,
+  ``O(1)`` for lookups instead of logarithmic.) See :pr:`479`.
+- Rewrite the cache vacuum algorithm and supporting data structures to
+  be substantially faster. See :issue:`474`.
 
 
 3.5.0a4 (2021-06-09)

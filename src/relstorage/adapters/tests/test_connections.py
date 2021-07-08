@@ -215,6 +215,7 @@ class TestStoreConnectionPool(TestCase):
         from relstorage.tests import MockConnection
 
         class ConnManager(AbstractConnectionManager):
+            # pylint:disable=signature-differs
             def __init__(self, options=None, driver=None):
                 super(ConnManager, self).__init__(options or MockOptions(),
                                                   driver or MockDriver())

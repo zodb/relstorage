@@ -199,7 +199,7 @@ def main(argv=None):
             next_tid = None
 
         source = _DefaultStartStorageIteration(source, next_tid)
-        assert not IStorageCurrentRecordIteration.providedBy(source)
+        assert not IStorageCurrentRecordIteration.providedBy(source) # pylint:disable=no-value-for-parameter
 
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")

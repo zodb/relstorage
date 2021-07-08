@@ -1,3 +1,4 @@
 cache.cpp
 cache_values.cpp
+_objectindex.cpp
 *.html

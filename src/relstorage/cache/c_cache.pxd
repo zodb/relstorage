@@ -4,19 +4,17 @@
 
 from libcpp.vector cimport vector
 from libcpp cimport bool
+from libcpp.utility cimport pair
 
+from relstorage._rs_types cimport int64_t
+from relstorage._rs_types cimport uint64_t
+from relstorage._rs_types cimport OID_t
+from relstorage._rs_types cimport TID_t
+from relstorage._rs_types cimport move
 
-cdef extern from *:
-    ctypedef signed long int64_t
-    ctypedef signed long uint64_t
-
-cdef extern from * namespace "boost":
-    T& move[T](T&)
 
 
 cdef extern from "c_cache.h" namespace "relstorage::cache":
-    ctypedef int64_t TID_t
-    ctypedef int64_t OID_t
 
     ctypedef enum generation_num:
         GEN_UNKNOWN,

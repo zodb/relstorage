@@ -154,20 +154,38 @@ setup(
                     'src/relstorage/cache/cache.pyx',
                     'src/relstorage/cache/c_cache.cpp',
                 ],
-                include_dirs=['include'],
+                include_dirs=['include', 'src/relstorage'],
                 # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
                 # /EHsc: `s`: enable stack unwinding, catch C++ exceptions in catch(...)
                 #        `c`: extern C functions never throw C++ exceptions.
-                # XXX: Why this flag or Python 2/Windows? /EHa (catch SEH and standard) seems better.
+                # XXX: Why this flag or Python 2/Windows?
+                # /EHa (catch SEH and standard) seems better.
                 extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
             ),
-
+            Extension(
+                name="relstorage._inthashmap",
+                language="c++",
+                sources=[
+                    'src/relstorage/_inthashmap.pyx',
+                ],
+                include_dirs=['include'],
+                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+            ),
+            Extension(
+                name="relstorage.cache._objectindex",
+                language="c++",
+                sources=[
+                    'src/relstorage/cache/_objectindex.pyx',
+                ],
+                include_dirs=['include', 'src/relstorage'],
+                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+            ),
         ],
         annotate=True,
         compiler_directives={
             'language_level': '3str',
             'always_allow_keywords': False,
-            'infer_types': False,
+            'infer_types': True,
             'nonecheck': False,
         },
     ),

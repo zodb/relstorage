@@ -21,6 +21,12 @@ from cpython.bytes cimport PyBytes_AsString # Does NOT copy
 from libcpp.pair cimport pair
 from libcpp.cast cimport static_cast
 from libcpp.cast cimport dynamic_cast
+from libcpp.set cimport set as std_set
+from libcpp.vector cimport vector
+from libcpp.iterator cimport back_inserter
+from libcpp.iterator cimport inserter
+from libcpp.algorithm cimport transform
+
 from libcpp.string cimport string
 
 from relstorage.cache.c_cache cimport TID_t
@@ -33,6 +39,7 @@ from relstorage.cache.c_cache cimport Generation
 from relstorage.cache.c_cache cimport move
 from relstorage.cache.c_cache cimport TempCacheFiller
 from relstorage.cache.c_cache cimport ProposedCacheEntry
+
 
 import sys
 from relstorage.cache.interfaces import NoSuchGeneration
@@ -59,9 +66,17 @@ cdef extern from *:
     void array_delete(T* t) {
         delete[] t;
     }
+
+    template <typename T>
+    typename T::first_type get_key(T pair) {
+        return pair.first;
+    }
+
     """
     T* array_new[T](int)
     void array_delete[T](T* t)
+    OID_t get_key(pair[OID_t, TID_t])
+
 
 ctypedef const SVCacheEntry* SVCacheEntry_p
 ctypedef const MVCacheEntry* MVCacheEntry_p
