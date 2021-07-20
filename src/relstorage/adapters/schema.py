@@ -20,11 +20,11 @@ import glob
 import sys
 
 from functools import partial
-from hashlib import md5
 
 from ZODB.POSException import StorageError
 
 from .._compat import ABC
+from .._compat import md5
 from ._util import DatabaseHelpersMixin
 from ._util import query_property
 from ._util import noop_when_history_free
