@@ -12,7 +12,7 @@
           PyMySQL is tested instead.
 
 On CPython2, mysqlclient 1.4+. PyMySQL 0.7+ and MySQL
-Connector/Python 8.0.16 are also tested to work.
+Connector/Python 8.0.16 up through 8.0.23 are also tested to work.
 
 For CPython3, install mysqlclient 1.4+; PyMySQL, and MySQL
 Connector/Python are also known to work.
