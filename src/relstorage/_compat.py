@@ -27,6 +27,9 @@ from ZODB._compat import dump
 from ZODB._compat import dumps
 from ZODB._compat import loads
 
+from functools import partial
+from hashlib import md5 as md5_original
+
 __all__ = [
     # ZODB exports
     'HIGHEST_PROTOCOL',
@@ -358,3 +361,14 @@ else:
         wrapper = _update_wrapper(wrapper, wrapped, *args, **kwargs)
         wrapper.__wrapped__ = wrapped
         return wrapped
+
+# XXX: In FIPS enabled environments, we need to use usedforsecurity=False
+#      if we want to use md5() for hashing on non security related usage,
+#      like it is the case with RelStorage. More info:
+#      https://bugs.python.org/issue9216
+#      https://bugs.python.org/issue40695
+try:
+    hashed = md5_original(b'test')
+    md5 = md5_original
+except ValueError:  # pragma: no cover
+    md5 = partial(md5_original, usedforsecurity=False)

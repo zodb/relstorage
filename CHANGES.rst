@@ -5,7 +5,7 @@
 3.5.0a5 (unreleased)
 ====================
 
-- Support using RelStorage in a FIPS enabled environment. See
+- Allow RelStorage to be used in a FIPS enabled environment. See
   :issue:`480`
 
 - Fix ``RelStorage.zap_all()`` and ``zodbconvert --clear`` against

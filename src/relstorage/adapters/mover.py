@@ -17,11 +17,11 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
-from relstorage._util import md5
 
 from zope.interface import implementer
 
 from .._compat import OID_TID_MAP_TYPE
+from .._compat import md5
 from .._util import metricmethod_sampled
 from .._util import metricmethod
 from ._util import noop_when_history_free
