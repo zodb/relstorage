@@ -25,6 +25,10 @@ import traceback
 import os
 
 import logging
+
+from functools import partial
+from hashlib import md5 as md5_original
+
 from logging import DEBUG
 from logging import INFO
 from logging import WARN
@@ -604,3 +608,13 @@ class NeedsFetchallBeforeCloseCursor(CloseTrackerCursor): # pragma: no cover
             self.needs_fetchall,
             self.last_stmt,
         )
+
+
+
+try:
+    hashed = md5_original('test'.encode())
+    md5 = md5_original
+except ValueError:
+    md5 = partial(md5_original, keywords={'usedforsecurity':False})
+
+md5=partial(md5_original, usedforsecurity=False)

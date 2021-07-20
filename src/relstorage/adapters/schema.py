@@ -20,7 +20,7 @@ import glob
 import sys
 
 from functools import partial
-from hashlib import md5
+from relstorage._util import md5
 
 from ZODB.POSException import StorageError
 

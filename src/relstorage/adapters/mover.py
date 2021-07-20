@@ -17,7 +17,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
-from hashlib import md5
+from relstorage._util import md5
 
 from zope.interface import implementer
 

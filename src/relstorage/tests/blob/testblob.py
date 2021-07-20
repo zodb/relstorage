@@ -24,7 +24,7 @@ import struct
 import tempfile
 import time
 import unittest
-from hashlib import md5
+from relstorage._util import md5
 
 import transaction
 import ZODB.blob
