@@ -615,6 +615,5 @@ try:
     hashed = md5_original('test'.encode())
     md5 = md5_original
 except ValueError:
-    md5 = partial(md5_original, keywords={'usedforsecurity':False})
+    md5 = partial(md5_original, usedforsecurity=False)
 
-md5=partial(md5_original, usedforsecurity=False)
