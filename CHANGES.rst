@@ -5,6 +5,9 @@
 3.5.0a5 (unreleased)
 ====================
 
+- Support using RelStorage in a FIPS enabled environment. See
+  :issue:`480`
+
 - Fix ``RelStorage.zap_all()`` and ``zodbconvert --clear`` against
   existing PostgreSQL databases with very large numbers of Blobs and
   relatively small amounts of shared memory (e.g., default values for
