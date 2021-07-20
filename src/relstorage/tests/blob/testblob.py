@@ -24,7 +24,6 @@ import struct
 import tempfile
 import time
 import unittest
-from relstorage._compat import md5
 
 import transaction
 import ZODB.blob
@@ -34,6 +33,8 @@ import ZODB.tests.util
 from ZODB.blob import Blob
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
+
+from relstorage._compat import md5
 
 from relstorage.tests import TestCase
 from relstorage.tests.util import USE_SMALL_BLOBS
