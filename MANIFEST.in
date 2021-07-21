@@ -12,7 +12,7 @@ recursive-include .travis *
 
 recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h *.sql *.cpp
 recursive-include src *.pxd *.pyx
-recursive-include include *.hpp *.txt *.rst *.ipp
+recursive-include include *.hpp *.txt *.rst *.ipp *.h
 
 recursive-include docs *.py *.rst *.png Makefile
 recursive-exclude docs relstorage.*.rst _build
