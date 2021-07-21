@@ -5,7 +5,7 @@
 3.5.0a6 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Correct a packaging problem in 3.5.0a5 (which is not on PyPI).
 
 
 3.5.0a5 (2021-07-21)
@@ -13,7 +13,6 @@
 
 - Allow RelStorage to be used in a FIPS enabled environment. See
   :issue:`480`
-
 - Fix ``RelStorage.zap_all()`` and ``zodbconvert --clear`` against
   existing PostgreSQL databases with very large numbers of Blobs and
   relatively small amounts of shared memory (e.g., default values for
