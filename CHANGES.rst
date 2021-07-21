@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.5.0a5 (unreleased)
+3.5.0a5 (2021-07-21)
 ====================
 
 - Allow RelStorage to be used in a FIPS enabled environment. See
