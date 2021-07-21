@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.5.0a6 (unreleased)
+3.5.0a6 (2021-07-21)
 ====================
 
 - Correct a packaging problem in 3.5.0a5 (which is not on PyPI).
