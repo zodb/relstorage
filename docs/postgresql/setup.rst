@@ -55,7 +55,7 @@ This section is current for PostgreSQL 13 and earlier versions.
 
 ``max_connections`` (100) gives the number of worker processes that could
 possibly be active at a time. Each worker consumes (at most)
-``work_mem`` (4MB) + ``temp_mem`` (8MB) = 12MB (plus a tiny bit of
+``work_mem`` (4MB) + ``temp_buffers`` (8MB) = 12MB (plus a tiny bit of
 overhead).
 
 ``shared_buffers`` is the amount of memory that PostgreSQL will
@@ -88,7 +88,7 @@ installation, some general tips are listed below.
                any settings. Some of those listed here may be risky,
                depending on your level of risk tolerance.
 
-* Increase ``temp_mem``. This prevents having to use disk tables for
+* Increase ``temp_buffers``. This prevents having to use disk tables for
   temporary storage. RelStorage does a lot with temp tables. In my
   benchmarks, I use 32MB.
 
