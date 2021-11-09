@@ -57,8 +57,11 @@ class TPCTemporaryStorage(object):
         queue = self._queue
         queue.seek(0, 2)  # seek to end
         startpos = queue.tell()
-        queue.write(state)
-        endpos = queue.tell()
+        if state is not None:
+            queue.write(state)
+            endpos = queue.tell()
+        else:
+            endpos = None
         self._queue_contents[oid_int] = (startpos, endpos, prev_tid_int)
 
     def __len__(self):
@@ -88,6 +91,8 @@ class TPCTemporaryStorage(object):
         Return the bytes for a previously stored temporary item.
         """
         startpos, endpos, _ = self._queue_contents[oid_int]
+        if endpos is None:
+            return None
         return self._read_temp_state(startpos, endpos)
 
     def __iter__(self):
@@ -96,7 +101,10 @@ class TPCTemporaryStorage(object):
     def iter_for_oids(self, oids):
         read_temp_state = self._read_temp_state
         for startpos, endpos, oid_int, prev_tid_int in self.items(oids):
-            state = read_temp_state(startpos, endpos)
+            if endpos is None:
+                state = None
+            else:
+                state = read_temp_state(startpos, endpos)
             yield state, oid_int, prev_tid_int
 
     def items(self, oids=None):

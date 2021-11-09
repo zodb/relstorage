@@ -300,7 +300,7 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
         query.executemany(
             cursor,
             (
-                (oid_int, tid_int, do_md5(data), Binary(data))
+                (oid_int, tid_int, do_md5(data), Binary(data) if data is not None else None)
                 for (data, oid_int, tid_int)
                 in state_oid_tid_iter
             )

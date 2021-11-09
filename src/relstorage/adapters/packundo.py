@@ -309,10 +309,12 @@ class PackUndo(DatabaseHelpersMixin):
                     INNER JOIN object_ref USING (zoid)
                     WHERE keep = %(TRUE)s
                     AND NOT EXISTS (
-                        SELECT 1
-                        FROM object_state
-                        WHERE object_state.zoid = to_zoid
-                        AND object_state.state IS NOT NULL
+                        SELECT state FROM (
+                            SELECT state, MAX(tid)
+                            FROM object_state
+                            WHERE object_state.zoid = to_zoid
+                        )
+                        WHERE state IS NOT NULL
                     )
                     """
                     self.runner.run_script_stmt(ss_load_cursor, stmt)
@@ -343,20 +345,6 @@ class PackUndo(DatabaseHelpersMixin):
     # pack. (We don't do anything with current_object; a state of NULL
     # represents a deleted object; it shouldn't be reachable anyway
     # and will be packed away next time we pack (without GC))
-
-    # We shouldn't *have* to verify the oldserial in the delete statement,
-    # because our only consumer is zc.zodbdgc which only calls us for
-    # unreachable objects, so they shouldn't be modified and get a new
-    # TID. But it's safer to do so.
-    _script_delete_object = None
-
-    def deleteObject(self, cursor, oid, oldserial):
-        params = {'oid': u64(oid), 'tid': u64(oldserial)}
-        self.runner.run_script_stmt(
-            cursor,
-            self._script_delete_object,
-            params)
-        return cursor.rowcount
 
     def on_filling_object_refs_added(self, oids=None, tids=None):
         """Test injection point for packing."""
@@ -475,14 +463,12 @@ class HistoryPreservingPackUndo(PackUndo):
         ).limit(delete_empty_transactions_batch_size))
     )
 
-    _script_delete_object = """
-    UPDATE object_state
-    SET state = NULL,
-        state_size = 0,
-        md5 = ''
-    WHERE zoid = %(oid)s
-    AND    tid = %(tid)s
-    """
+    def deleteObject(self, shared_state, oid, oldserial):
+        oid_int = u64(oid)
+        oldserial_int = u64(oldserial)
+        shared_state.temp_storage.store_temp(oid_int, None, oldserial_int)
+        # can't count how many objects are deleted in history-preserving mode
+        return None
 
     _is_packed_tx_query = Schema.transaction.select(
         1
@@ -1186,6 +1172,14 @@ class HistoryFreePackUndo(PackUndo):
     WHERE zoid = %(oid)s
     and tid = %(tid)s
     """
+    def deleteObject(self, shared_state, oid, oldserial):
+        cursor = shared_state.store_connection.cursor
+        params = {'oid': u64(oid), 'tid': u64(oldserial)}
+        self.runner.run_script_stmt(
+            cursor,
+            self._script_delete_object,
+            params)
+        return cursor.rowcount
 
     def on_fill_object_ref_batch(self, oid_batch, num_refs_found):
         """Hook for testing."""

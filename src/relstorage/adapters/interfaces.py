@@ -1020,7 +1020,7 @@ class IPackUndo(Interface):
         accept two parameters, oid and tid (64 bit integers).
         """
 
-    def deleteObject(cursor, oid_int, tid_int):
+    def deleteObject(shared_state, oid_int, tid_int):
         """
         Delete the revision of *oid_int* in transaction *tid_int*.
 
@@ -1042,9 +1042,10 @@ class IPackUndo(Interface):
         is at *tid_int*), leading all access to *oid_int* in the
         future to throw ``POSKeyError``.
 
-        In history preserving databases, this means to set the state for the object
-        at the transaction to NULL, signifying that it's been deleted. A subsequent
-        pack operation is required to actually remove these deleted items.
+        In history preserving databases, this means to create new object
+        revision with state=NULL , signifying that the object has been deleted.
+        A subsequent pack operation is required to actually remove these
+        deleted items.
         """
 
 class IPoller(Interface):

@@ -400,15 +400,11 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         history = storage.history(obj_oid, size=100)
         self.assertEqual(6, len(history))
         latest_tid = history[0]['tid']
-        # We can delete the latest TID for the OID, and the whole
+        # We can record deletion for the OID, and the whole
         # object goes away on a pack.
         t = TransactionMetaData()
         storage.tpc_begin(t)
-        count = storage.deleteObject(obj_oid, latest_tid, t)
-        self.assertEqual(count, 1)
-        # Doing it again will do nothing because it's already
-        # gone.
-        count = storage.deleteObject(obj_oid, latest_tid, t)
+        storage.deleteObject(obj_oid, latest_tid, t)
         invalidations = storage.tpc_vote(t)
         storage.tpc_finish(t)
 
@@ -424,6 +420,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             storage.load(obj_oid)
 
         # But we can load a state before then.
+        state = storage.loadSerial(obj_oid, history[0]['tid'])
+        self.assertEqual(len(state), history[0]['size'])
         state = storage.loadSerial(obj_oid, history[1]['tid'])
         self.assertEqual(len(state), history[1]['size'])
 

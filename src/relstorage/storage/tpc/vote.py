@@ -630,29 +630,11 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     __slots__ = ()
 
     def _vote(self, storage):
-        if self.shared_state.temp_storage and self.shared_state.temp_storage.stored_oids:
-            raise StorageTransactionError("Cannot store and delete at the same time.")
-        # We only get here if we've deleted objects, meaning we hold their row locks.
-        # We only delete objects once we hold the commit lock.
-        assert self.committing_tid_lock
-        # Holding the commit lock put an entry in the transaction table,
-        # but we don't want to bump the TID or store that data.
-        self.shared_state.adapter.txncontrol.delete_transaction(
-            self.shared_state.store_connection.cursor,
-            self.committing_tid_lock.tid_int
-        )
-        self.lock_and_vote_times[0] = time.time()
-        return ()
-
-    def _lock_and_move(self, vote_only=False):
-        # We don't do the final commit,
-        # we just prepare.
-        self._enter_critical_phase_until_transaction_end()
-        self.shared_state.prepared_txn = self.shared_state.adapter.txncontrol.commit_phase1(
-            self.shared_state.store_connection,
-            self.committing_tid_lock.tid_int
-        )
-        return False
+        if self.shared_state.temp_storage:
+            for (state, _, _) in self.shared_state.temp_storage:
+                if state is not None:
+                    raise StorageTransactionError("Cannot store and delete at the same time.")
+        return super(HistoryPreservingDeleteOnly, self)._vote(storage)
 
 
 class _CachedConflictResolver(ConflictResolvingStorage):
