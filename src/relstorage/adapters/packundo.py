@@ -313,7 +313,7 @@ class PackUndo(DatabaseHelpersMixin):
                             SELECT state, MAX(tid)
                             FROM object_state
                             WHERE object_state.zoid = to_zoid
-                        )
+                        ) t
                         WHERE state IS NOT NULL
                     )
                     """
