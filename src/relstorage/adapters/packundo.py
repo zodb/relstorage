@@ -312,11 +312,11 @@ class PackUndo(DatabaseHelpersMixin):
                         SELECT state FROM (
                             SELECT state
                             FROM object_state
-                            WHERE object_state.zoid = to_zoid
+                            WHERE object_state.zoid = object_ref.to_zoid
                             AND object_state.tid = (
                                 SELECT MAX(tid)
                                 FROM object_state
-                                WHERE object_state.zoid = to_zoid
+                                WHERE object_state.zoid = object_ref.to_zoid
                             )
                         ) t
                         WHERE state IS NOT NULL
