@@ -309,17 +309,15 @@ class PackUndo(DatabaseHelpersMixin):
                     INNER JOIN object_ref USING (zoid)
                     WHERE keep = %(TRUE)s
                     AND NOT EXISTS (
-                        SELECT state FROM (
-                            SELECT state
+                        SELECT 1
+                        FROM object_state
+                        WHERE object_state.zoid = object_ref.to_zoid
+                        AND object_state.tid = (
+                            SELECT MAX(tid)
                             FROM object_state
                             WHERE object_state.zoid = object_ref.to_zoid
-                            AND object_state.tid = (
-                                SELECT MAX(tid)
-                                FROM object_state
-                                WHERE object_state.zoid = object_ref.to_zoid
-                            )
-                        ) t
-                        WHERE state IS NOT NULL
+                        )
+                        AND state IS NOT NULL
                     )
                     """
                     self.runner.run_script_stmt(ss_load_cursor, stmt)
