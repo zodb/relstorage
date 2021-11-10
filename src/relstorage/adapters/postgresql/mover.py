@@ -339,31 +339,45 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
     def _read_one_tuple_md5(self,
                             buf,
                             _pack_into=WITH_SUM.pack_into,
-                            _header_size=WITH_SUM.size,
-                            _blank_header=bytearray(WITH_SUM.size)):
+                            _blank_header=bytearray(WITH_SUM.size),
+                            _pack_into_nodata=NO_SUM.pack_into,
+                            _blank_header_nodata=bytearray(NO_SUM.size)):
 
-        data, oid_int, tid_int = next(self._iter)
-        len_data = len(data)
-        md5 = self._digester(data)
         offset = len(buf)
-        buf.extend(_blank_header)
-        _pack_into(
-            buf, offset,
-            4,
-            8, oid_int,
-            8, tid_int,
-            32, md5,
-            len_data
-        )
-        buf.extend(data)
+        data, oid_int, tid_int = next(self._iter)
+        if data is not None:
+            len_data = len(data)
+            md5 = self._digester(data)
+            buf.extend(_blank_header)
+            _pack_into(
+                buf, offset,
+                4,
+                8, oid_int,
+                8, tid_int,
+                32, md5,
+                len_data
+            )
+            buf.extend(data)
+
+        else:
+            buf.extend(_blank_header_nodata)
+            _pack_into_nodata(
+                buf, offset,
+                4,
+                8, oid_int,
+                8, tid_int,
+                -1,
+                -1,
+            )
 
     def _read_one_tuple_no_md5(self,
                                buf,
                                _pack_into=NO_SUM.pack_into,
-                               _header_size=NO_SUM.size,
                                _blank_header=bytearray(NO_SUM.size)):
         data, oid_int, tid_int = next(self._iter)
-        len_data = len(data)
+        len_data = -1
+        if data is not None:
+            len_data = len(data)
         offset = len(buf)
         buf.extend(_blank_header)
         _pack_into(
@@ -374,4 +388,5 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
             -1,
             len_data
         )
-        buf.extend(data)
+        if data is not None:
+            buf.extend(data)
