@@ -215,7 +215,7 @@ class TestHistoryPreservingDeleteOnly(_InterfaceMixin, unittest.TestCase):
         return HistoryPreservingDeleteOnly
 
     def _check_lock_and_move_commit(self, committed):
-        self.assertFalse(committed)
+        self.assertTrue(committed)
 
 class TestFunctions(unittest.TestCase):
 
