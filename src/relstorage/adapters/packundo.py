@@ -310,9 +310,14 @@ class PackUndo(DatabaseHelpersMixin):
                     WHERE keep = %(TRUE)s
                     AND NOT EXISTS (
                         SELECT state FROM (
-                            SELECT state, MAX(tid)
+                            SELECT state
                             FROM object_state
                             WHERE object_state.zoid = to_zoid
+                            AND object_state.tid = (
+                                SELECT MAX(tid)
+                                FROM object_state
+                                WHERE object_state.zoid = to_zoid
+                            )
                         ) t
                         WHERE state IS NOT NULL
                     )
