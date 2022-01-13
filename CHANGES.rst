@@ -2,6 +2,12 @@
  Changes
 =========
 
+3.5.6 (unreleased)
+==================
+
+- Add ``ssl`` option to MySQLAdapterFactory configuration.
+  This enables explicit use of SSL when connection is opened.
+
 3.4.5 (2021-04-23)
 ==================
 
