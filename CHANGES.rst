@@ -5,7 +5,8 @@
 3.5.0a7 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Add ``ssl`` option to MySQLAdapterFactory configuration.
+  This enables explicit use of SSL when connection is opened.
 
 
 3.5.0a6 (2021-07-21)

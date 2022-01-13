@@ -211,6 +211,12 @@
       </description>
     </key>
 
+    <key name="ssl" datatype="boolean" required="no">
+      <description>
+        if set, connection uses ssl
+      </description>
+    </key>
+
     <key name="named_pipe" datatype="boolean" required="no">
       <description>
         if set, connect to server via named pipe (Windows only)
