@@ -356,7 +356,7 @@ class Connection(sqlite3.Connection):
             PRAGMA optimize;
             """)
         except sqlite3.OperationalError:
-            logger.debug("Failed to optimize databas, probably in use", exc_info=True)
+            logger.debug("Failed to optimize database, probably in use", exc_info=True)
         except sqlite3.DatabaseError:
             # It's possible the file was removed.
             logger.exception("Failed to optimize database; was it removed?")
