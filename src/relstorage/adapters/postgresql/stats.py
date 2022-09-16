@@ -49,7 +49,12 @@ class PostgreSQLStats(AbstractStats):
         conn, cursor = self.connmanager.open_for_load()
         try:
             cursor.execute(self._get_object_count_query)
-            return cursor.fetchone()[0]
+            # If the tables haven't been analyzed, this could be None?
+            # Or, somehow negative? 0 seems most likely, but just in case,
+            # we check both.
+            # Seen on GithubActions macos/py3.7/psycopg2, sept 2022.
+            # Not seen before.
+            return max(cursor.fetchone()[0] or 0, 0)
         finally:
             self.connmanager.close(conn, cursor)
 

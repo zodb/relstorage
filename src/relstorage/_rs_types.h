@@ -28,13 +28,15 @@ typedef unsigned int uint32_t;
 #include <cstdint>
 #endif
 /* ssize_t is also a problem, although strangely only in Python 3.10
-   on Windows. Perhaps Python 3.9 had this define somewhere? I can't
-   find it...
+   on Windows. Apparently earlier versions had this define somewhere:
+      c:\python37\include\pyconfig.h(167)
    We should use Py_ssize_t where we can, of course.
 */
 #ifdef _MSC_VER
+/* This causes problems on 32-bit builds, so lets not use ssize_t.
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
+*/
 #else
 #include <unistd.h>
 #endif
