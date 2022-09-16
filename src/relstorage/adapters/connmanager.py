@@ -234,6 +234,7 @@ class AbstractConnectionManager(object):
         # Some drivers also don't allow you to close the cursor
         # without fetching all rows.
         self._synchronize_cursor_for_rollback(cursor)
+        clean = False
         try:
             clean = self.__rollback_connection(
                 conn,

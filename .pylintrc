@@ -38,12 +38,12 @@
 # consider-using-with: New in pylint 2.8, catches things like ``return open(path)``, which
 #   obviously can't use a ``with`` statement. Disabled as 90% of hits (~20) were a false positive,
 #   and a few didn't apply to Python 2.
+# unspecified-encoding: Python 2 doesn't allow open() to take an encoding.
 disable=
     invalid-name,
     missing-docstring,
     ungrouped-imports,
     protected-access,
-    no-self-use,
     too-few-public-methods,
     exec-used,
     global-statement,
@@ -62,7 +62,13 @@ disable=
     relative-beyond-top-level,
     super-with-arguments,
     raise-missing-from,
-    consider-using-with
+    consider-using-with,
+    consider-using-f-string,
+    unnecessary-lambda-assignment,
+    redundant-u-string-prefix,
+    unnecessary-dunder-call,
+    c-extension-no-member,
+    unspecified-encoding
 #   undefined-all-variable
 
 

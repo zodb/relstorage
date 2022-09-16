@@ -2,11 +2,18 @@
  Changes
 =========
 
-3.5.0a7 (unreleased)
+3.5.0 (unreleased)
 ====================
 
-- Nothing changed yet.
-
+- Add support for Python 3.10.
+- Stop accidentally enabling unsafe math optimizations in compiled
+  manylinux binaries.
+- Stop testing Postgresql 9.6. None of the code required to support
+  this obsolete version of Postgres was removed, but it is no longer
+  officially supported and the code will be removed in the future.
+- NOTE: Expect this to be the last major release to contain support
+  for obsolete versions of Python, including Python 2.7 and Python
+  3.6. This major release may not include binary wheels for these platforms.
 
 3.5.0a6 (2021-07-21)
 ====================

@@ -239,7 +239,7 @@ class UsesThreadsOnASingleStorageMixin(object):
             # afterwards, we can't open the database.
             'check_tid_ordering_w_commit',
     ):
-        locals()[bad_test] = make_func(bad_test)
+        locals()[bad_test] = make_func(bad_test) # pylint:disable=too-many-function-args
 
     del make_func
     del bad_test
@@ -603,7 +603,7 @@ class GenericRelStorageTests(
         oids_per_segment = 578
         segment_count = 3
         total_expected_oids = oids_per_segment * segment_count
-        oids_by_thread = [list() for _ in range(thread_count)]
+        oids_by_thread = [list() for _ in range(thread_count)] # pylint:disable=use-list-literal
 
         def allocate_oids(thread_storage, thread_num):
             conn_pool = thread_storage._store_connection_pool

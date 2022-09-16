@@ -25,8 +25,8 @@ from perfmetrics import statsd_client
 
 from zope.interface import implementer
 
-from relstorage._inthashmap import OidTidMap as OidTMap
-from relstorage._inthashmap import OidSet
+from relstorage._inthashmap import OidTidMap as OidTMap # pylint:disable=no-name-in-module
+from relstorage._inthashmap import OidSet # pylint:disable=no-name-in-module
 from relstorage._compat import iteroiditems
 
 from relstorage._util import log_timed
@@ -39,7 +39,7 @@ from relstorage.options import Options
 
 from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
-from ._objectindex import _ObjectIndex
+from ._objectindex import _ObjectIndex # pylint:disable=no-name-in-module
 
 
 

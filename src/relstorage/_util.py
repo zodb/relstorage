@@ -362,7 +362,7 @@ def thread_spawn(func, args=(), daemon=False):
     t = _ThreadWithReady(target=func, args=args)
     t.name = t.name + '-spawn-' + func.__name__
     if daemon:
-        t.setDaemon(daemon)
+        t.setDaemon(daemon) # pylint:disable=deprecated-method
     t.start()
     return t
 

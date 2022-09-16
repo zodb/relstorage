@@ -409,7 +409,7 @@ class TestLocking(TestCase):
             read_current_oids = storage._tpc_phase.required_tids.keys()
             if notify:
                 cond.acquire(5)
-                cond.notifyAll()
+                cond.notifyAll() # pylint:disable=deprecated-method
                 cond.release()
 
             try:
@@ -423,7 +423,7 @@ class TestLocking(TestCase):
             finally:
                 if notify:
                     cond.acquire(5)
-                    cond.notifyAll()
+                    cond.notifyAll() # pylint:disable=deprecated-method
                     cond.release()
 
 
@@ -572,7 +572,7 @@ class TestLocking(TestCase):
         cond.storage_finished = None
         def do_vote(storage, tx):
             cond.acquire(5)
-            cond.notifyAll()
+            cond.notifyAll() # pylint:disable=deprecated-method
             cond.release()
             try:
                 storage.tpc_vote(tx)
@@ -581,7 +581,7 @@ class TestLocking(TestCase):
             finally:
                 cond.storage_finished = storage, tx
                 cond.acquire(5)
-                cond.notifyAll()
+                cond.notifyAll() # pylint:disable=deprecated-method
                 cond.release()
 
         thread_locking_b = threading.Thread(

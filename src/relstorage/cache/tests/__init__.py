@@ -9,7 +9,7 @@ from __future__ import print_function
 
 from zope import interface
 
-from relstorage.cache.cache import PyCache as _BaseCache
+from relstorage.cache.cache import PyCache as _BaseCache # pylint:disable=no-name-in-module
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 from relstorage.tests import MockOptions

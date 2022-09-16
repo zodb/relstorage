@@ -75,7 +75,7 @@ class _LazyResource(BaseLazy):
     # any use of the *resource* after success.
     release_function = None
 
-    def _stored_value_for_name_in_inst(self, value, name, inst):
+    def _stored_value_for_name_in_inst(self, value, name, inst): # pylint:disable=arguments-differ
         # type: (Any, str, SharedTPCState) -> None
         if name == 'store_connection':
             # Try to do this first

@@ -104,7 +104,7 @@ def populate():
     print()
 
 def bench_multiunion_no_overlap(loops):
-    from relstorage._inthashmap import OidTidMap
+    from relstorage._inthashmap import OidTidMap # pylint:disable=no-name-in-module
     # 2000 maps of 250 unique oids
     # 29.3ms with the BTree sorting
     # 25.2ms with the stdlib sort/unique/erase approach, but copying into a new result

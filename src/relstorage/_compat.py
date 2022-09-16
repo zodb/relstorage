@@ -142,8 +142,8 @@ else:
 # is generally faster. We use it everywhere.
 ###
 
-from relstorage._inthashmap import OidTidMap as OID_TID_MAP_TYPE
-from relstorage._inthashmap import OidSet as OID_SET_TYPE
+from relstorage._inthashmap import OidTidMap as OID_TID_MAP_TYPE # pylint:disable=no-name-in-module
+from relstorage._inthashmap import OidSet as OID_SET_TYPE # pylint:disable=no-name-in-module
 #OID_SET_TYPE = BTrees.family64.UU.TreeSet
 #OID_TID_MAP_TYPE = BTrees.family64.UU.BTree
 

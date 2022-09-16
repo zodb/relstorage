@@ -6,6 +6,9 @@ build:
   verbosity: minimal
 # The VS 2019 image doesn't have
 # the MSVC needed for Python 2.7.
+# Note that this contains nothing newer than Python 3.8; there is no
+# image that has all of our supported versions, so we have to
+# customize per version.
 image: Visual Studio 2015
 
 environment:
@@ -49,15 +52,17 @@ environment:
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
 
-    - PYTHON: "C:\\Python27-x64"
-      PYTHON_VERSION: "2.7.x" # currently 2.7.13
+    - PYTHON: "C:\\Python310-x64"
+      PYTHON_VERSION: "3.10.0"
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
 
-    - PYTHON: "C:\\Python36-x64"
-      PYTHON_VERSION: "3.6.x" # currently 3.6.0
+    - PYTHON: "C:\\Python39-x64"
       PYTHON_ARCH: "64"
+      PYTHON_VERSION: "3.9.x"
       PYTHON_EXE: python
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
 
     ## 32-bit, wheel only (no testing)
 
@@ -69,18 +74,6 @@ environment:
 
     - PYTHON: "C:\\Python37"
       PYTHON_VERSION: "3.7.x"
-      PYTHON_ARCH: "32"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
-
-    - PYTHON: "C:\\Python36"
-      PYTHON_VERSION: "3.6.x" # currently 3.6.3
-      PYTHON_ARCH: "32"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
-
-    - PYTHON: "C:\\Python27"
-      PYTHON_VERSION: "2.7.x" # currently 2.7.13
       PYTHON_ARCH: "32"
       PYTHON_EXE: python
       GWHEEL_ONLY: true
