@@ -513,7 +513,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
     def checkSimpleHistory(self):
         if not self.__tid_clock_needs_care():
-            return super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+            return super(HistoryPreservingRelStorageTests, self).checkSimpleHistory() # pylint:disable=no-member
         # This assumes that the `time` value in the storage.history()
         # for an object always increases, even though there are 8-byte TID values
         # that, while themselves increasing, round down to equal floating point
@@ -585,7 +585,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertLess = lambda *args: None
 
         try:
-            super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+            super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()  # pylint:disable=no-member
         finally:
             del self.assertLess
 

@@ -156,7 +156,7 @@ namespace cache {
         static inline size_t size(const PyObject*const & pickle)
         {
             assert(pickle);
-            ssize_t s = PyBytes_Size(const_cast<PyObject*&>(pickle));
+            Py_ssize_t s = PyBytes_Size(const_cast<PyObject*&>(pickle));
             if (unlikely(s < 0))
                 throw std::runtime_error("Size not valid");
 

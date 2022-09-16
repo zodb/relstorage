@@ -26,7 +26,7 @@ from .interfaces import AggregateOperationTimeoutError
 # {(placeholder, count): "string"}
 _row_schemas = {}
 
-class RowBatcher(object):
+class RowBatcher(object): # pylint:disable=too-many-instance-attributes
     """
     Generic row batcher.
 
