@@ -2,8 +2,8 @@
  Changes
 =========
 
-3.5.0 (unreleased)
-====================
+3.5.0 (2022-09-16)
+==================
 
 - Add support for Python 3.10.
 - Stop accidentally enabling unsafe math optimizations in compiled
