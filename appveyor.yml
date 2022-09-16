@@ -42,6 +42,18 @@ environment:
     # a later point release.
 
     ## 64-bit
+    - PYTHON: "C:\\Python310-x64"
+      PYTHON_VERSION: "3.10.0"
+      PYTHON_ARCH: "64"
+      PYTHON_EXE: python
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
+
+    - PYTHON: "C:\\Python39-x64"
+      PYTHON_ARCH: "64"
+      PYTHON_VERSION: "3.9.x"
+      PYTHON_EXE: python
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
+
     - PYTHON: "C:\\Python38-x64"
       PYTHON_VERSION: "3.8.x"
       PYTHON_ARCH: "64"
@@ -51,18 +63,6 @@ environment:
       PYTHON_VERSION: "3.7.x"
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
-
-    - PYTHON: "C:\\Python310-x64"
-      PYTHON_VERSION: "3.10.0"
-      PYTHON_ARCH: "64"
-      PYTHON_EXE: python
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
-
-    - PYTHON: "C:\\Python39-x64"
-      PYTHON_ARCH: "64"
-      PYTHON_VERSION: "3.9.x"
-      PYTHON_EXE: python
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
 
     ## 32-bit, wheel only (no testing)
 
