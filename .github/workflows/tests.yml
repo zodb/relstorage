@@ -119,6 +119,7 @@ jobs:
           pip install -U -q setuptools wheel twine
           pip install -q -U 'cython>=3.0b3'
           pip install -U coverage
+          pip install -U cffi
       - name: Build mysqlclient
         # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
         # client binaries on PyPI are linked against that. We can install that,
