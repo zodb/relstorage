@@ -2,10 +2,13 @@
  Changes
 =========
 
-3.5.1 (unreleased)
+4.0.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Drop support for Python versions that are end of life, including
+  everything less than 3.7.
+- Add the "Requires Python" metadata to prevent installation on Python
+  < 3.7.
 
 
 3.5.0 (2022-09-16)

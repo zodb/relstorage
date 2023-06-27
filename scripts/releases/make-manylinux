@@ -59,14 +59,15 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     cd /RelStorage
     rm -rf wheelhouse
     mkdir wheelhouse
-    for variant in `ls -d /opt/python/cp*`; do
+
+    for variant in `ls -d /opt/python/cp{37,38,39,310,311}*`; do
         echo "Building $variant"
         mkdir /tmp/build
         cd /tmp/build
         git clone /RelStorage RelStorage
         cd RelStorage
         $variant/bin/pip install -U pip
-        $variant/bin/pip install -U 'cython>=3.0a6' setuptools
+        $variant/bin/pip install -U 'cython>=3.0b3' setuptools
         PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
         auditwheel show dist/RelStorage*.whl
         auditwheel repair dist/RelStorage*.whl

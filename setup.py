@@ -49,7 +49,6 @@ VERSION = read_file('version.txt').strip()
 PYPY = hasattr(sys, 'pypy_version_info')
 WINDOWS = sys.platform.startswith("win")
 PY3 = sys.version_info[0] == 3
-PY2 = not PY3
 
 memcache_require = [
     'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
@@ -57,7 +56,6 @@ memcache_require = [
 ]
 
 tests_require = [
-    'mock ; python_version == "2.7"',
     # random2 is a forward port of python 2's random to
     # python 3. Our test_cache_stats (inherited from ZEO)
     # needs that. Without it, the tests can work on Py2 but
@@ -79,7 +77,6 @@ tests_require = [
     # psutil >= 5.6.4.
     # https://github.com/giampaolo/psutil/issues/1659
     'psutil; platform_python_implementation=="CPython" or python_version!="2.7"',
-    'psutil == 5.6.3; platform_python_implementation=="PyPy" and python_version=="2.7"',
 ] + memcache_require
 
 
@@ -103,12 +100,12 @@ setup(
     license="ZPL 2.1",
     platforms=["any"],
     description="A backend for ZODB that stores pickles in a relational database.",
+    python_requires=">=3.7",
     classifiers=[
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Zope Public License",
         "Programming Language :: Python",
-        "Programming Language :: Python :: 2.7",
-        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3 :: Only",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
@@ -147,6 +144,12 @@ setup(
         'transaction >= 2.4.0',
     ],
     ext_modules=cythonize(
+        # For Python 2 on Windows, we used to compile with the /EHsc flag:
+        # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
+        # /EHsc: `s`: enable stack unwinding, catch C++ exceptions in catch(...)
+        #        `c`: extern C functions never throw C++ exceptions.
+        # XXX: Why this flag or Python 2/Windows? Only?!
+        # /EHa (catch SEH and standard) seems better.
         [
             Extension(
                 name="relstorage.cache.cache",
@@ -156,12 +159,7 @@ setup(
                     'src/relstorage/cache/c_cache.cpp',
                 ],
                 include_dirs=['include', 'src/relstorage'],
-                # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
-                # /EHsc: `s`: enable stack unwinding, catch C++ exceptions in catch(...)
-                #        `c`: extern C functions never throw C++ exceptions.
-                # XXX: Why this flag or Python 2/Windows?
-                # /EHa (catch SEH and standard) seems better.
-                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+                extra_compile_args=[],
             ),
             Extension(
                 name="relstorage._inthashmap",
@@ -170,7 +168,7 @@ setup(
                     'src/relstorage/_inthashmap.pyx',
                 ],
                 include_dirs=['include'],
-                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+                extra_compile_args=[],
             ),
             Extension(
                 name="relstorage.cache._objectindex",
@@ -179,7 +177,7 @@ setup(
                     'src/relstorage/cache/_objectindex.pyx',
                 ],
                 include_dirs=['include', 'src/relstorage'],
-                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+                extra_compile_args=[],
             ),
         ],
         annotate=True,

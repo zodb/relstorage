@@ -81,159 +81,36 @@ env:
 
 
 jobs:
-
-  build-relstorage:
-    # Sigh. Note that the matrix must be kept in sync
-    # with `test`
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: [2.7, pypy-2.7-7.3.3, pypy-3.6, 3.6, 3.7, 3.8, 3.9, "3.10"]
-        # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
-        # mysql 8.0
-        os: [ubuntu-18.04, macos-latest]
+        python-version: [pypy-3.9, 3.7, 3.8, 3.9, '3.10', '3.11']
+        os: [ubuntu-latest, macos-latest]
         exclude:
           - os: macos-latest
-            python-version: pypy-2.7-7.3.3
-          - os: macos-latest
-            python-version: pypy-3.6
-          - os: macos-latest
-            python-version: 3.5
-          - os: macos-latest
-            python-version: 3.6
-        include:
-          - os: ubuntu-20.04
-            python-version: 3.8
-
+            python-version: pypy-3.9
     steps:
       - name: checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install ccache, configure CFLAGS (ubuntu)
-        uses: ./.github/actions/config-cc
-      ###
-      # Caching.
-      # This actually *restores* a cache and schedules a cleanup action
-      # to save the cache. So it must come before the thing we want to use
-      # the cache.
-      ###
-      - name: Cache ~/.ccache
-        uses: actions/cache@v2
-        with:
-          path: ~/.ccache/
-          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
-
-      - name: Get pip cache dir
-        id: pip-cache
-        run: |
-          echo "::set-output name=dir::$(pip cache dir)"
-
-      - name: pip cache
-        uses: actions/cache@v2
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip3-
+          cache: 'pip'
+          cache-dependency-path: setup.py
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
 
 
       - name: Install Build Dependencies
-        # CAUTION: Updated gevent and greenlet 2.0 are going to clash
-        # here. Why are we manually installing greenlet anyway?
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'cython>=3.0a6'
-          pip install 'greenlet~=1.0;platform_python_implementation=="CPython"'
-
-      - name: Build RelStorage
-        run: |
-          # Next, build the wheel *in place*. This helps ccache, and also lets us cache the configure
-          # output (pip install uses a random temporary directory, making this difficult).
-          python setup.py build_ext -i
-          python setup.py bdist_wheel
-          # Also install it, so that we get dependencies in the (pip) cache.
-          pip install .[test]
-
-      - name: Check RelStorage build
-        run: |
-          ls -l dist
-          twine check dist/*
-      - name: Upload RelStorage wheel
-        uses: actions/upload-artifact@v2
-        with:
-          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
-          path: dist/*whl
-      - name: Publish package to PyPI (mac)
-        # We cannot 'uses: pypa/gh-action-pypi-publish@v1.4.1' because
-        # that's apparently a container action, and those don't run on
-        # the Mac.
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && startsWith(runner.os, 'Mac')
-        env:
-          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-        run: |
-          twine upload --skip-existing dist/*
-
-  test:
-    needs: build-relstorage
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        python-version: [2.7, pypy-2.7-7.3.3, pypy-3.6, 3.6, 3.7, 3.8, 3.9, "3.10"]
-        # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
-        # mysql 8.0
-        os: [ubuntu-18.04, macos-latest]
-        exclude:
-          - os: macos-latest
-            python-version: pypy-2.7-7.3.3
-          - os: macos-latest
-            python-version: pypy-3.6
-          - os: macos-latest
-            python-version: 3.5
-          - os: macos-latest
-            python-version: 3.6
-        include:
-          - os: ubuntu-20.04
-            python-version: 3.8
-
-    steps:
-      - name: checkout
-        uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install ccache, configure CFLAGS (ubuntu)
-        uses: ./.github/actions/config-cc
-
-      - name: Cache ~/.ccache
-        uses: actions/cache@v2
-        with:
-          path: ~/.ccache/
-          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
-
-      - name: Get pip cache dir
-        id: pip-cache
-        run: |
-          echo "::set-output name=dir::$(pip cache dir)"
-
-      - name: pip cache
-        uses: actions/cache@v2
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip3-
-
-      - name: Install native libs
-        uses: ./.github/actions/install-native-libs
-
+          pip install -q -U 'cython>=3.0b3'
+          pip install -U coverage
       - name: Build mysqlclient
         # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
         # client binaries on PyPI are linked against that. We can install that,
@@ -244,22 +121,47 @@ jobs:
         if: startsWith( matrix.os, 'ubuntu-20')
         run: |
           pip install --no-binary :all: mysqlclient
-      - name: Download RelStorage wheel
-        uses: actions/download-artifact@v2
+
+      - name: Install RelStorage (non-Mac)
+        if: ${{ ! startsWith(runner.os, 'Mac') }}
+        run: |
+          python setup.py bdist_wheel
+          python -m pip install -U -e ".[test,docs,all_tested_drivers]"
+        env:
+          # Ensure we test with assertions enabled.
+          # As opposed to the manylinux builds, which we distribute and
+          # thus only use O3 (because Ofast enables fast-math, which has
+          # process-wide effects), we test with Ofast here, because we
+          # expect that some people will compile it themselves with that setting.
+          CPPFLAGS: "-Ofast -UNDEBUG"
+
+      - name: Install RelStorage (Mac)
+        if: startsWith(runner.os, 'Mac')
+        run: |
+          python setup.py bdist_wheel
+          python -m pip install -U -e ".[test,docs,all_tested_drivers]"
+        env:
+          # Unlike the above, we are actually distributing these
+          # wheels, so they need to be built for production use.
+          CPPFLAGS: "-O3"
+          # Build for both architectures
+          ARCHFLAGS: "-arch x86_64 -arch arm64"
+
+      - name: Check RelStorage build
+        run: |
+          ls -l dist
+          twine check dist/*
+      - name: Upload RelStorage wheel
+        uses: actions/upload-artifact@v2
         with:
           name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
-          path: dist/
-      - name: Install RelStorage
-        # I'd prefer to install the wheel in non-editable mode, but that seems to
-        # screw up coverage reporting.
-        # XXX: So this may be broken now
+          path: dist/*whl
+      - name: lint
+        if: matrix.python-version == '3.11' && startsWith(runner.os, 'Linux')
+        # At this writing, PyLint 2.17/astroid 2.15 won't work on 3.12
         run: |
-          pip install -U coverage
-          pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
-          pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
-          # Also unzip into src/ so that zope.testrunner can find the .so files
-          # when we ask it to load tests from that directory.
-          unzip -n dist/RelStorage-*whl -d src
+          pip install -U pylint
+          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
       - name: Initialize Test Databases
         if: startsWith(runner.os, 'macOS')
         run: |
@@ -290,122 +192,53 @@ jobs:
         uses: ./.github/actions/run-tests
         with:
           useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
-      - name: Submit to Coveralls
-        # This is a container action, which only runs on Linux.
-        if: ${{ !startsWith(matrix.python-version, 'pypy') && startsWith(runner.os, 'Linux') }}
-        uses: AndreMiras/coveralls-python-action@develop
-        with:
-          parallel: true
 
-  coveralls_finish:
-    needs: [test]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Coveralls Finished
-      uses: AndreMiras/coveralls-python-action@develop
-      with:
-        parallel-finished: true
-
-
-  lint:
-    needs: build-relstorage
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        python-version: [3.9]
-        os: [ubuntu-18.04]
-
-    steps:
-      - name: checkout
-        uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Get pip cache dir
-        id: pip-cache
+      - name: Publish package to PyPI (mac)
+        # We cannot 'uses: pypa/gh-action-pypi-publish@v1.4.1' because
+        # that's apparently a container action, and those don't run on
+        # the Mac.
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && startsWith(runner.os, 'Mac')
+        env:
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
         run: |
-          echo "::set-output name=dir::$(pip cache dir)"
+          twine upload --skip-existing dist/*
 
-      - name: pip cache
-        uses: actions/cache@v2
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip3-
-      - name: Install ccache, configure CFLAGS (ubuntu)
-        uses: ./.github/actions/config-cc
 
-      - name: Download RelStorage wheel
-        uses: actions/download-artifact@v2
-        with:
-          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
-          path: dist/
-      - name: Install RelStorage
-        run: |
-          pip install -U pip
-          pip install -U wheel
-          pip install -U `ls dist/RelStorage-*`[test]
-      - name: Lint
-        # We only need to do this on one version, and it should be Python 3, because
-        # pylint has stopped updating for Python 2.
-        # We used to pass ``limit-inference-results=1``, thinking that
-        # sped things up. It doesn't actually seem to, and it does
-        # cause a bunch of false positives, at least in 2.9.3.
-        run: |
-          pip install -U pylint
-          python -m pylint --rcfile=.pylintrc relstorage -f parseable -r n
-
-  manylinux_x86_64:
+  manylinux:
     runs-on: ubuntu-latest
     # We use a regular Python matrix entry to share as much code as possible.
     strategy:
       matrix:
         python-version: [3.9]
-
+        image:
+          - manylinux2010_x86_64
+          - manylinux2014_aarch64
+          - manylinux2014_ppc64le
+          - manylinux2014_s390x
+          - manylinux2014_x86_64
+          - musllinux_1_1_x86_64
+          - musllinux_1_1_aarch64
+    name: ${{ matrix.image }}
     steps:
       - name: checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Cache ~/.ccache
-        uses: actions/cache@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
         with:
-          path: ~/.ccache/
-          key: ${{ runner.os }}-ccache_manylinux2-${{ matrix.python-version }}
-      - name: Get pip cache dir
-        id: pip-cache
-        run: |
-          echo "::set-output name=dir::$(pip cache dir)"
-
-      - name: pip cache
-        uses: actions/cache@v2
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip_manylinux_x8664-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Update pip
-        run: pip install -U pip
+          platforms: all
       - name: Build RelStorage
-        # An alternate way to do this is to run the container directly with a uses:
-        # and then the script runs inside it. That may work better with caching.
-        # See https://github.com/pyca/bcrypt/blob/f6b5ee2eda76d077c531362ac65e16f045cf1f29/.github/workflows/wheel-builder.yml
         env:
-          DOCKER_IMAGE: quay.io/pypa/manylinux2010_x86_64
-        run: scripts/releases/make-manylinux
-      - name: Upload RelStorage wheels
-        uses: actions/upload-artifact@v2
+          DOCKER_IMAGE: quay.io/pypa/${{ matrix.image }}
+        run: bash ./scripts/releases/make-manylinux
+      - name: Store RelStorage wheels
+        uses: actions/upload-artifact@v3
         with:
           path: wheelhouse/*whl
-          name: manylinux_x86_64_wheels.zip
-      - name: Restore pip cache permissions
-        run: sudo chown -R $(whoami) ${{ steps.pip-cache.outputs.dir }}
+          name: ${{ matrix.image }}_wheels.zip
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@v1.4.1
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
@@ -414,6 +247,7 @@ jobs:
           password: ${{ secrets.TWINE_PASSWORD }}
           skip_existing: true
           packages_dir: wheelhouse/
+
 
 # TODO:
 # * Use YAML syntax to share snippets, like the old .travis.yml did
