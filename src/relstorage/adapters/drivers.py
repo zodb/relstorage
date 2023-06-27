@@ -24,7 +24,6 @@ from zope.interface import directlyProvides
 from zope.interface import implementer
 
 from .._compat import PYPY
-from .._compat import PY3
 from .._compat import casefold
 from .._util import get_positive_integer_from_environ
 from .._util import consume
@@ -315,18 +314,12 @@ class MemoryViewBlobDriverMixin(object):
     # are forced to make the copy. Plus there are tests that like to
     # directly compare bytes.
 
-    if PY3:
-        def binary_column_as_state_type(self, data):
-            if data:
-                # Calling 'bytes()' on a memoryview in Python 3 does
-                # nothing useful.
-                data = data.tobytes()
-            return data
-    else:
-        def binary_column_as_state_type(self, data):
-            if data:
-                data = bytes(data)
-            return data
+    def binary_column_as_state_type(self, data):
+        if data:
+            # Calling 'bytes()' on a memoryview in Python 3 does
+            # nothing useful.
+            data = data.tobytes()
+        return data
 
 
 @implementer(IDBDriverFactory)

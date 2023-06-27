@@ -18,8 +18,6 @@ from __future__ import print_function
 
 import os
 
-from relstorage._compat import PY3
-
 from . import test_blobhelper
 from .test_blobhelper import write_file
 from .test_blobhelper import read_file
@@ -102,8 +100,6 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
     def test_openCommittedBlobFile_as_file(self):
         blobhelper = self._make_default()
         with blobhelper.openCommittedBlobFile(None, test_oid, test_tid) as f:
-            if not PY3:
-                self.assertEqual(f.__class__, file) # pylint:disable=undefined-variable
             self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_as_blobfile(self):
@@ -129,8 +125,6 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
         blobhelper._loadBlobInternal = loadBlob_wrapper
         with blobhelper.openCommittedBlobFile(None, test_oid, test_tid) as f:
             self.assertEqual(loadBlob_calls, [1])
-            if not PY3:
-                self.assertEqual(f.__class__, file) # pylint:disable=undefined-variable
             self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_retry_as_blobfile(self):

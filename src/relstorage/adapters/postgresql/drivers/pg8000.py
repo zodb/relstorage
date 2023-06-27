@@ -153,9 +153,6 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                         max_prepared_statements=max_prepared_statements,
                         tcp_keepalive=tcp_keepalive
                     )
-                    if str is bytes: # PY2
-                        del kwargs['ssl_context']
-                        kwargs['ssl'] = ssl_context
                     try:
                         super().__init__(**kwargs)
                     except TypeError:

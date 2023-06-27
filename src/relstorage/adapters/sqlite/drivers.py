@@ -24,9 +24,6 @@ import functools
 
 from zope.interface import implementer
 
-from relstorage._compat import PY3
-from relstorage._compat import PY2
-from relstorage._compat import PY36
 from relstorage._util import log_timed
 
 from ..drivers import implement_db_driver_options
@@ -212,17 +209,6 @@ class Connection(sqlite3.Connection):
     def _at_transaction_end(self):
         pass
 
-    if not PY3:
-        # This helpful attribute is Python 3 only.
-        assert not hasattr(sqlite3.Connection, 'in_transaction')
-        __in_transaction = None
-        @property
-        def in_transaction(self):
-            return self.__in_transaction
-
-        def _at_transaction_end(self):
-            self.__in_transaction = None
-
     def register_before_commit_cleanup(self, func):
         self.before_commit_functions.append(func)
 
@@ -374,9 +360,8 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         # Tested to work on Python 2.7 and Python 3.6+;
         # seen some strange ``ProgrammingError: closed``
         # on Python 3.5
-        (PY2 or PY36)
         # 3.11 is the oldest version tested on CI
-        and sqlite3.sqlite_version_info[:2] >= (3, 11)
+        sqlite3.sqlite_version_info[:2] >= (3, 11)
     )
 
     CONNECTION_FACTORY = Connection
@@ -395,23 +380,22 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         # module's connect() method so we get our preferred goodies.
         self._connect = self.connect_to_file
 
-    if PY3:
-        # in_transaction doesn't work on Py2, so assume the worst
-        # by inheriting the functions.
-        def connection_may_need_rollback(self, conn):
-            try:
-                return conn.in_transaction
-            except sqlite3.ProgrammingError:
-                # we're closed. We do need to attempt the rollback so
-                # we catch the error and know to drop the connection.
-                return True
+    # in_transaction doesn't work on Py2, so assume the worst
+    # by inheriting the functions.
+    def connection_may_need_rollback(self, conn):
+        try:
+            return conn.in_transaction
+        except sqlite3.ProgrammingError:
+            # we're closed. We do need to attempt the rollback so
+            # we catch the error and know to drop the connection.
+            return True
 
-        connection_may_need_commit = connection_may_need_rollback
+    connection_may_need_commit = connection_may_need_rollback
 
-        # Py2 returns buffer for blobs, hence the Mixin.
-        # But Py3 returns plain bytes.
-        def binary_column_as_state_type(self, data):
-            return data
+    # Py2 returns buffer for blobs, hence the Mixin.
+    # But Py3 returns plain bytes.
+    def binary_column_as_state_type(self, data):
+        return data
 
 
 

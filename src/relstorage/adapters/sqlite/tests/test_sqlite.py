@@ -30,7 +30,6 @@ from relstorage.tests.util import AbstractTestSuiteBuilder
 from relstorage.tests.util import RUNNING_ON_TRAVIS
 from relstorage.tests.util import RUNNING_ON_APPVEYOR
 from relstorage._compat import PYPY
-from relstorage._compat import PY3
 
 class Sqlite3AdapterMixin(object):
 
@@ -203,9 +202,9 @@ class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
     __BASE_SKIPPED_TESTS = (
         # These were both seen on Travis with PyPy3.6 7.1.1, sqlite 3.11.
         # I can't reproduce locally.
-        ('checkAutoReconnect', PYPY and PY3 and RUNNING_ON_TRAVIS,
+        ('checkAutoReconnect', PYPY and RUNNING_ON_TRAVIS,
          "Somehow still winds up closed"),
-        ('checkAutoReconnectOnSync', PYPY and PY3 and RUNNING_ON_TRAVIS,
+        ('checkAutoReconnectOnSync', PYPY and RUNNING_ON_TRAVIS,
          "Somehow still winds up closed"),
     )
 

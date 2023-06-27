@@ -41,9 +41,6 @@ __all__ = [
     'loads',
 
     # Constants
-    'PY3',
-    'PY2',
-    'PY36',
     'PYPY',
     'WIN',
     'MAC',
@@ -76,46 +73,31 @@ __all__ = [
     'perf_counter',
 ]
 
-PY3 = sys.version_info[0] == 3
-PY36 = sys.version_info[:2] >= (3, 6)
-PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
 WIN = sys.platform.startswith('win')
 MAC = sys.platform.startswith('darwin')
 
-try:
-    # Python 3.3+ (PEP 418)
 
-    # The value (in fractional seconds) of a performance counter, i.e.
-    # a clock with the highest available resolution to measure a short
-    # duration. It does include time elapsed during sleep and is
-    # system-wide. The reference point of the returned value is
-    # undefined, so that only the difference between the results of
-    # consecutive calls is valid.
-    from time import perf_counter
-except ImportError:
-    import time
+# Python 3.3+ (PEP 418)
 
-    if sys.platform == "win32":
-        perf_counter = time.clock # pylint: disable=no-member
-    else:
-        perf_counter = time.time
+# The value (in fractional seconds) of a performance counter, i.e.
+# a clock with the highest available resolution to measure a short
+# duration. It does include time elapsed during sleep and is
+# system-wide. The reference point of the returned value is
+# undefined, so that only the difference between the results of
+# consecutive calls is valid.
+from time import perf_counter
 
-    del time
 
 # Dict support
+# This exists for legacy code only; new code can assume the
+# methods.
+def list_values(d):
+    return list(d.values())
+iteritems = dict.items
+iterkeys = dict.keys
+itervalues = dict.values
 
-if PY3:
-    def list_values(d):
-        return list(d.values())
-    iteritems = dict.items
-    iterkeys = dict.keys
-    itervalues = dict.values
-else:
-    list_values = dict.values
-    iteritems = dict.iteritems  # pylint:disable=no-member
-    iterkeys = dict.iterkeys  # pylint:disable=no-member
-    itervalues = dict.itervalues  # pylint:disable=no-member
 
 ###
 # OID and TID data structures.
@@ -300,27 +282,11 @@ def iteroiditems(d):
 
 # Types
 
-if PY3:
-    string_types = (str,)
-    number_types = (int, float)
-    from io import StringIO as NStringIO
-    from functools import wraps
-else:
-    string_types = (basestring,) # pylint:disable=undefined-variable
-    number_types = (int, long, float) # pylint:disable=undefined-variable
-    from io import BytesIO as NStringIO
-    # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
-    # attribute, and we need that.
-    from functools import wraps as _wraps
-    class wraps(object):
-        def __init__(self, func):
-            self._orig = func
-            self._wrapper = _wraps(func)
+string_types = (str,)
+number_types = (int, float)
+from io import StringIO as NStringIO
+from functools import wraps
 
-        def __call__(self, replacement):
-            replacement = self._wrapper(replacement)
-            replacement.__wrapped__ = self._orig
-            return replacement
 
 
 IN_TESTRUNNER = (
@@ -339,29 +305,15 @@ except ImportError:
     del abc
 
 # Functions
-if PY3:
-    xrange = range
-    intern = sys.intern
-    from base64 import encodebytes as base64_encodebytes
-    from base64 import decodebytes as base64_decodebytes
-    casefold = str.casefold
-    from traceback import clear_frames
-    clear_frames = clear_frames # pylint:disable=self-assigning-variable
-    from functools import update_wrapper
-else:
-    xrange = xrange # pylint:disable=self-assigning-variable
-    intern = intern # pylint:disable=self-assigning-variable
-    from base64 import encodestring as base64_encodebytes # pylint:disable=no-name-in-module
-    from base64 import decodestring as base64_decodebytes # pylint:disable=no-name-in-module
-    casefold = str.lower
-    def clear_frames(tb): # pylint:disable=unused-argument
-        "Does nothing on Py2."
+xrange = range
+intern = sys.intern
+from base64 import encodebytes as base64_encodebytes
+from base64 import decodebytes as base64_decodebytes
+casefold = str.casefold
+from traceback import clear_frames
+clear_frames = clear_frames # pylint:disable=self-assigning-variable
+from functools import update_wrapper
 
-    from functools import update_wrapper as _update_wrapper
-    def update_wrapper(wrapper, wrapped, *args, **kwargs):
-        wrapper = _update_wrapper(wrapper, wrapped, *args, **kwargs)
-        wrapper.__wrapped__ = wrapped
-        return wrapped
 
 # In FIPS enabled environments, we need to use usedforsecurity=False
 # if we want to use md5() for hashing on non security related usage,

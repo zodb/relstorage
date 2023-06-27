@@ -20,7 +20,6 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
-from relstorage._compat import PY2
 from relstorage._compat import PYPY
 from relstorage.adapters.interfaces import IDBDriver
 
@@ -117,24 +116,13 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
             # The Python implementation calls row_to_python(), the C version
             # calls to_python()
+
+            # XXX: It's possible this area is where the problems on
+            # mysql.connector >= 8.0.33 are introduced.
             class BlobConverter(mysql.connector.conversion.MySQLConverter):
 
                 def __init__(self, charset_name, use_unicode):
-                    if PY2:
-                        use_unicode = False
                     super().__init__(charset_name, use_unicode)
-
-                if PY2:
-                    def _STRING_to_python(self, value, dsc=None):
-                        # This is also supposed to handle SET, but we don't use that type
-                        # anywhere
-                        if isinstance(value, bytearray):
-                            # The Python version tends to return bytearray values.
-                            return bytes(value)
-                        # The C extension tends to return byte (aka str) values.
-                        return super()._STRING_to_python(value, dsc) # pylint:disable=no-member
-
-                    _VAR_STRING_to_python = _STRING_to_python
 
                 # There are a few places we get into trouble on
                 # Python 2/3 with bytearrays comping back: they
