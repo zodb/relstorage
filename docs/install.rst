@@ -2,8 +2,8 @@
  Installation
 ==============
 
-RelStorage 3.0 is supported on Python 2.7.9+, Python 3.6, 3.7,
-3.8, and 3.9, as well as PyPy2 and PyPy 3 7.1 or later.
+RelStorage 3.0 is supported on Python 3.7,
+through 3.11, as well as PyPy3 3.9 or later.
 
 .. seealso:: :doc:`supported-databases`
 

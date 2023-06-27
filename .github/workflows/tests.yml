@@ -202,7 +202,11 @@ jobs:
         uses: ./.github/actions/run-tests
         with:
           useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
-
+      - name: Coveralls Parallel
+        uses: coverallsapp/github-action@v2
+        with:
+          flag-name: run-${{ join(matrix.*, '-') }}
+          parallel: true
       - name: Publish package to PyPI (mac)
         # We cannot 'uses: pypa/gh-action-pypi-publish@v1.4.1' because
         # that's apparently a container action, and those don't run on
@@ -213,6 +217,15 @@ jobs:
         run: |
           twine upload --skip-existing dist/*
 
+  coveralls-finish:
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        uses: coverallsapp/github-action@v2
+        with:
+          parallel-finished: true
 
   manylinux:
     runs-on: ubuntu-latest

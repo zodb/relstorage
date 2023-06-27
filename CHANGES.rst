@@ -9,7 +9,11 @@
   everything less than 3.7.
 - Add the "Requires Python" metadata to prevent installation on Python
   < 3.7.
-- The minimum supported version of MySQL is 5.3.3.
+- Add support for Python 3.11.
+- Bump tested database drivers to their latest versions, with the
+  exception of ``mysql-connector-python``; this driver is only tested
+  at version 8.0.31 as there are known incompatibilities with 8.0.32
+  (which is currently the latest version).
 
 
 3.5.0 (2022-09-16)
