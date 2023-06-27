@@ -92,6 +92,9 @@ jobs:
         exclude:
           - os: macos-latest
             python-version: pypy-3.9
+          # Get an error importing _bz2 on macos/3.7
+          - os: macos-latest
+            python-version: 3.7
     steps:
       - name: checkout
         uses: actions/checkout@v3
