@@ -120,12 +120,8 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
             # XXX: It's possible this area is where the problems on
             # mysql.connector >= 8.0.33 are introduced.
             class BlobConverter(mysql.connector.conversion.MySQLConverter):
-
-                def __init__(self, charset_name, use_unicode):
-                    super().__init__(charset_name, use_unicode)
-
                 # There are a few places we get into trouble on
-                # Python 2/3 with bytearrays comping back: they
+                # Python 2/3 with bytearrays coming back: they
                 # can't be hashed for the local_client compression
                 # functions or sent to zlib.decompress(), they
                 # can't be sent to pickle.loads(), etc, so it's

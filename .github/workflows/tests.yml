@@ -227,6 +227,7 @@ jobs:
           parallel-finished: true
 
   manylinux:
+    needs: test
     runs-on: ubuntu-latest
     # We use a regular Python matrix entry to share as much code as possible.
     strategy:
