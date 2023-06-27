@@ -265,18 +265,18 @@ setup(
             # up too heavy for better parallelism.
 
             # First, mysql
-            # pymysql on 3.6 on all platforms.
-            'PyMySQL >= 0.6.6',
+            # pymysql on 3.9 on all platforms.
+            'PyMySQL >= 0.6.6; python_version == "3.9"',
             # mysqlclient (binary) on all CPythons. It's the default.
             'mysqlclient >= 2.0.0',
             # mysql-connector-python; one of two pure-python versions
             # XXX: >= 8.0.32 has issues with binary values!
-            'mysql-connector-python == 8.0.31; python_version == "3.11"',
+            'mysql-connector-python == 8.0.31; python_version == "3.10"',
 
             # postgresql
             # pure-python
             # pg8000
-            'pg8000 >= 1.29.0',
+            'pg8000 >= 1.29.0; python_version == "3.11"',
             # CFFI, runs on all implementations.
             'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
