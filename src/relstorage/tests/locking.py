@@ -217,7 +217,7 @@ class TestLocking(TestCase):
         self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
 
     @WithAndWithoutInterleaving
-    def checkTL_ReadCurrentConflict_DoesNotTakeExclusiveLocks(self):
+    def checkTL_ReadCurrentConflict_DoesNotTakeExclusiveLocks(self): # pylint:disable=too-many-locals
         # Proves that if we try to check an old serial that has already moved on,
         # we don't try taking exclusive locks at all.
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
@@ -411,7 +411,7 @@ class TestLocking(TestCase):
             read_current_oids = storage._tpc_phase.required_tids.keys()
             if notify:
                 cond.acquire(5)
-                cond.notifyAll() # pylint:disable=deprecated-method
+                cond.notify_all()
                 cond.release()
 
             try:
@@ -425,7 +425,7 @@ class TestLocking(TestCase):
             finally:
                 if notify:
                     cond.acquire(5)
-                    cond.notifyAll() # pylint:disable=deprecated-method
+                    cond.notify_all()
                     cond.release()
 
 
@@ -574,7 +574,7 @@ class TestLocking(TestCase):
         cond.storage_finished = None
         def do_vote(storage, tx):
             cond.acquire(5)
-            cond.notifyAll() # pylint:disable=deprecated-method
+            cond.notify_all()
             cond.release()
             try:
                 storage.tpc_vote(tx)
@@ -583,7 +583,7 @@ class TestLocking(TestCase):
             finally:
                 cond.storage_finished = storage, tx
                 cond.acquire(5)
-                cond.notifyAll() # pylint:disable=deprecated-method
+                cond.notify_all()
                 cond.release()
 
         thread_locking_b = threading.Thread(

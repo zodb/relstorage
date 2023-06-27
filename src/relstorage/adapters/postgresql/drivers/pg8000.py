@@ -243,7 +243,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     def connection_may_need_commit(self, conn):
         if conn.readonly:
             return False
-        return conn.in_transaction
+        # pg8000 1.29 changed in_transaction to _in_transaction
+        return conn._in_transaction
 
     def _get_exception_pgcode(self, exc):
         return exc.args[0]['C']

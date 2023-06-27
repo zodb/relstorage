@@ -273,7 +273,7 @@ setup(
             # postgresql
             # pure-python
             # pg8000
-            'pg8000 >= 1.11.0',
+            'pg8000 >= 1.29.0',
             # CFFI, runs on all implementations.
             # We get coverage from 3.x on Travis and verification it works on Windows from Travis.
             # We get 2.7 testing from PyPy on Travis.
