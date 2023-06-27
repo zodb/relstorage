@@ -39,6 +39,7 @@ from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import AbstractFromFileStorage
 from relstorage.tests.reltestbase import AbstractToFileStorage
 
+# pylint:disable=protected-access
 
 class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-statements
@@ -49,7 +50,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # collects garbage but does not retain old versions.
 
     def _dostore(self, *args, **kwargs): # pylint:disable=arguments-differ,signature-differs
-        result = super(HistoryFreeRelStorageTests, self)._dostore(*args, **kwargs)
+        result = super()._dostore(*args, **kwargs)
         # Finish the transaction and update our view of the database.
         self._storage.afterCompletion()
         self._storage.poll_invalidations()

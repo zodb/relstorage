@@ -1,6 +1,70 @@
-#[MASTER]
-# These need examined and fixed on a case-by-case basis.
-#load-plugins=pylint.extensions.bad_builtin,pylint.extensions.check_elif,pylint.extensions.comparetozero,pylint.extensions.emptystring
+[MASTER]
+load-plugins=pylint.extensions.bad_builtin,
+   pylint.extensions.code_style,
+   pylint.extensions.dict_init_mutate,
+   pylint.extensions.dunder,
+   pylint.extensions.emptystring,
+   pylint.extensions.comparetozero,
+   pylint.extensions.comparison_placement,
+   pylint.extensions.confusing_elif,
+   pylint.extensions.for_any_all,
+   pylint.extensions.consider_refactoring_into_while_condition,
+   pylint.extensions.mccabe,
+   pylint.extensions.check_elif,
+   pylint.extensions.eq_without_hash,
+   pylint.extensions.redefined_variable_type,
+   pylint.extensions.overlapping_exceptions,
+   pylint.extensions.docparams,
+
+# magic_value wants you to not use arbitrary strings and numbers
+# inline in the code. But it's overzealous and has way too many false
+# positives. Trust people to do the most readable thing.
+#   pylint.extensions.magic_value
+
+# Empty comment would be good, except it detects blank lines within
+# a single comment block.
+#
+# Those are often used to separate paragraphs, like here.
+#   pylint.extensions.empty_comment,
+
+# consider_ternary_expression is a nice check, but is also overzealous.
+# Trust the human to do the readable thing.
+#    pylint.extensions.consider_ternary_expression,
+
+# redefined_loop_name tends to catch us with things like
+# for name in (a, b, c): name = name + '_column' ...
+#    pylint.extensions.redefined_loop_name,
+
+# This wants you to turn ``x in (1, 2)`` into ``x in {1, 2}``.
+# They both result in the LOAD_CONST bytecode, one a tuple one a
+# frozenset. In theory a set lookup using hashing is faster than
+# a linear scan of a tuple; but if the tuple is small, it can often
+# actually be faster to scan the tuple.
+#   pylint.extensions.set_membership,
+
+# Fix zope.cachedescriptors.property.Lazy; the property-classes doesn't seem to
+# do anything.
+# https://stackoverflow.com/questions/51160955/pylint-how-to-specify-a-self-defined-property-decorator-with-property-classes
+# For releases prior to 2.14.2, this needs to be a one-line, quoted string. After that,
+# a multi-line string.
+# - Make zope.cachedescriptors.property.Lazy look like a property;
+#   fixes pylint thinking it is a method.
+# - Run in Pure Python mode (ignore C extensions that respect this);
+#   fixes some issues with zope.interface, like IFoo.providedby(ob)
+#   claiming not to have the right number of parameters...except no, it does not.
+init-hook =
+    import astroid.bases
+    astroid.bases.POSSIBLE_PROPERTIES.add('Lazy')
+    astroid.bases.POSSIBLE_PROPERTIES.add('LazyOnClass')
+    astroid.bases.POSSIBLE_PROPERTIES.add('readproperty')
+    astroid.bases.POSSIBLE_PROPERTIES.add('non_overridable')
+    import os
+    os.environ['PURE_PYTHON'] = ("1")
+    # Ending on a quoted string
+    # breaks pylint 2.14.5 (it strips the trailing quote. This is
+    # probably because it tries to handle one-line quoted strings as well as multi-blocks).
+    # The parens around it fix the issue.
+
 
 [MESSAGES CONTROL]
 
@@ -13,7 +77,8 @@
 # comments at the end of the line does the same thing (though Py3 supports
 # mixing)
 
-# invalid-name, ; Things like loadBlob get flagged
+
+# invalid-name, ; We get lots of these, especially in scripts. should fix many of them
 # protected-access, ; We have many cases of this; legit ones need to be examinid and commented, then this removed
 # no-self-use, ; common in superclasses with extension points
 # too-few-public-methods, ; Exception and marker classes get tagged with this
@@ -30,103 +95,115 @@
 #   see https://github.com/PyCQA/pylint/issues/846
 # useless-suppression: the only way to avoid repeating it for specific statements everywhere that we
 #   do Py2/Py3 stuff is to put it here. Sadly this means that we might get better but not realize it.
-# chained-comparison: It wants you to rewrite `x > 2 and x < 3` using something like `2 < x < 3`,
-#   which I don't like, I find that less readable.
-# import-outside-toplevel: New in pylint 2.4. We have a large number of deferred imports.
-# super-with-arguments and raise-missing-from: New in pylint 2.7; we can't use them because
-#   we support Python 2.
-# consider-using-with: New in pylint 2.8, catches things like ``return open(path)``, which
-#   obviously can't use a ``with`` statement. Disabled as 90% of hits (~20) were a false positive,
-#   and a few didn't apply to Python 2.
-# unspecified-encoding: Python 2 doesn't allow open() to take an encoding.
-disable=
-    invalid-name,
+# duplicate-code: Yeah, the compatibility ssl modules are much the same
+# In pylint 1.8.0, inconsistent-return-statements are created for the wrong reasons.
+# This code raises it, even though there is only one return (the implicit ``return None`` is presumably
+# what triggers it):
+#  def foo():
+#    if baz:
+#      return 1
+# In Pylint 2dev1, needed for Python 3.7, we get spurious "useless return" errors:
+# @property
+# def foo(self):
+#   return None # generates useless-return
+# Pylint 2.4 adds import-outside-toplevel. But we do that a lot to defer imports because of patching.
+# Pylint 2.4 adds self-assigning-variable. But we do *that* to avoid unused-import when we
+# "export" the variable and dont have a __all__.
+# Pylint 2.6+ adds some python-3-only things that dont apply: raise-missing-from, super-with-arguments, consider-using-f-string, redundant-u-string-prefix
+# cyclic import is added because it pylint is spuriously detecting that
+# consider-using-assignment-expr wants you to transform things like:
+#   foo = get_foo()
+#   if foo: ...
+#
+# Into ``if (foo := get_foo()):``
+# But there are a *lot* of those. Trust people to do the right, most
+# readable, thing
+# unnecessary-lambda-assignment: We use this pattern a fair amount
+# redefined-variable-type: Fairly common
+
+disable=wrong-import-position,
+    wrong-import-order,
     missing-docstring,
     ungrouped-imports,
-    protected-access,
+    invalid-name,
     too-few-public-methods,
-    exec-used,
     global-statement,
-    multiple-statements,
     locally-disabled,
-    cyclic-import,
     too-many-arguments,
-    redefined-builtin,
     useless-suppression,
     duplicate-code,
-    inconsistent-return-statements,
     useless-object-inheritance,
-    chained-comparison,
-    too-many-ancestors,
     import-outside-toplevel,
-    relative-beyond-top-level,
-    super-with-arguments,
-    raise-missing-from,
-    consider-using-with,
+    self-assigning-variable,
     consider-using-f-string,
+    consider-using-assignment-expr,
     unnecessary-lambda-assignment,
-    redundant-u-string-prefix,
-    unnecessary-dunder-call,
-    c-extension-no-member,
-    unspecified-encoding
-#   undefined-all-variable
+    redefined-variable-type,
+    cyclic-import,
 
-
-[IMPORTS]
-# It's common to have ZODB and a few closely related dependencies
-# installed in the virtual environment with us. That causes it to be
-# recognized as first party, meaning that it is suddenly sorted
-# incorrectly compared to other third party imports such as zope.
-known-third-party=ZODB,transaction
+enable=consider-using-augmented-assign
 
 [FORMAT]
-# duplicated from setup.cfg
 max-line-length=100
+max-module-lines=1100
 
 [MISCELLANEOUS]
 # List of note tags to take in consideration, separated by a comma.
 #notes=FIXME,XXX,TODO
-# Disable that, we don't want them in the report (???)
+# Disable that, we don't want them to fail the lint CI job.
 notes=
 
 [VARIABLES]
 
 dummy-variables-rgx=_.*
+init-import=true
 
 [TYPECHECK]
 
 # List of members which are set dynamically and missed by pylint inference
-# system, and so shouldn't trigger E1101 when accessed. Python regular
+# system, and so shouldnt trigger E1101 when accessed. Python regular
 # expressions are accepted.
-# gevent: this is helpful for py3/py2 code.
-generated-members=exc_clear,cache_checker,adapter
+generated-members=REQUEST,acl_users,aq_parent,providedBy
+
+
+# Tells whether missing members accessed in mixin class should be ignored. A
+# mixin class is detected if its name ends with "mixin" (case insensitive).
+# XXX: deprecated in 2.14; replaced with ignored-checks-for-mixins.
+# The defaults for that value seem to be what we want
+#ignore-mixin-members=yes
 
 # List of classes names for which member attributes should not be checked
-# (useful for classes with attributes dynamically set). This supports can work
+# (useful for classes with attributes dynamically set). This can work
 # with qualified names.
+#ignored-classes=SSLContext, SSLSocket, greenlet, Greenlet, parent, dead
 
-ignored-classes=SectionValue,Lazy,_v_c,c
 
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis. It
 # supports qualified module names, as well as Unix pattern matching.
-ignored-modules=
+#ignored-modules=gevent._corecffi,gevent.os,os,greenlet,threading,gevent.libev.corecffi,gevent.socket,gevent.core,gevent.testing.support
 
 [DESIGN]
-max-attributes=15
-max-locals=20
-
+max-attributes=12
+max-parents=10
+# Bump complexity up one.
+max-complexity=11
 
 [BASIC]
-# Prospector turns on unsafe-load-any-extension by default, but
+# Prospector turns ot unsafe-load-any-extension by default, but
 # pylint leaves it off. This is the proximal cause of the
 # undefined-all-variable crash.
 unsafe-load-any-extension = yes
+# This does not seem to work, hence the init-hook
+property-classes=zope.cachedescriptors.property.Lazy,zope.cachedescriptors.property.Cached
 
-property-classes=zope.cachedescriptors.property.Lazy,zope.cachedescriptors.property.Cached,relstorage._util.Lazy
+[CLASSES]
+# List of interface methods to ignore, separated by a comma. This is used for
+# instance to not check methods defines in Zope's Interface base class.
+
 
 
 # Local Variables:
-# mode: conf-space
+# mode: conf
 # End:

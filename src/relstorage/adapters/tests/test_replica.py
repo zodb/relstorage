@@ -14,6 +14,7 @@
 
 import unittest
 
+# pylint:disable=protected-access
 
 class ReplicaSelectorTests(unittest.TestCase):
 
@@ -38,7 +39,8 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test__read_config_empty(self):
         from relstorage.adapters.replica import ReplicaSelector
-        open(self.fn, 'w').close()  # truncate the replica list file
+        with open(self.fn, 'w'):  # truncate the replica list file
+            pass
         self.assertRaises(IndexError, ReplicaSelector, self.fn, 600.0)
 
     def test__is_config_modified(self):

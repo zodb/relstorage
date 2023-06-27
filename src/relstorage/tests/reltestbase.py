@@ -18,6 +18,7 @@ from __future__ import print_function
 
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 # pylint:disable=too-many-statements,too-many-locals
+# pylint:disable=protected-access
 import contextlib
 import functools
 import os

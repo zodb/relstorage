@@ -350,7 +350,7 @@ def thread_spawn(func, args=(), daemon=False):
 
             def run(self):
                 try:
-                    super(T, self).run()
+                    super().run()
                 finally:
                     self.__ready = True
 

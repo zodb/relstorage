@@ -17,7 +17,6 @@
 # history-free storages.
 # pylint:disable=no-member,too-many-locals
 
-import itertools
 import time
 
 import transaction
@@ -30,11 +29,9 @@ from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
 
 from relstorage.interfaces import IRelStorage
-from relstorage._compat import PY3
 from relstorage._compat import iteritems
 
-if not PY3:
-    zip = itertools.izip
+# pylint:disable=protected-access
 
 class IteratorDeepCompare(object):
 
@@ -43,7 +40,7 @@ class IteratorDeepCompare(object):
         # they do not store history).
         self.compare_exact(src, dest)
 
-    def compare_exact(self, storage1, storage2):
+    def compare_exact(self, storage1, storage2): # pylint:disable=too-complex
         """Confirm that storage1 and storage2 contain equivalent data"""
         eq = self.assertEqual
         missing = object()
@@ -131,7 +128,8 @@ class IteratorDeepCompare(object):
                     except ZODB.POSException.POSKeyError:
                         blob = None
                     else:
-                        blob = open(fn, 'rb').read()
+                        with open(fn, 'rb') as f:
+                            blob = f.read()
                 else:
                     blob = None
                 src_objects[rec.oid] = (rec.tid, rec.data, blob)
@@ -145,7 +143,8 @@ class IteratorDeepCompare(object):
                     except ZODB.POSException.POSKeyError:
                         blob = None
                     else:
-                        blob = open(fn, 'rb').read()
+                        with open(fn, 'rb') as f:
+                            blob = f.read()
                 else:
                     blob = None
                 dst_object = (rec.tid, rec.data, blob)
@@ -176,15 +175,15 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         root = conn.root()
         root.obj = obj1 = MinPO(1)
         txn = transaction.get()
-        txn.note(u'root -> obj')
+        txn.note('root -> obj')
         txn.commit()
         root.obj.obj = obj2 = MinPO(2)
         txn = transaction.get()
-        txn.note(u'root -> obj -> obj')
+        txn.note('root -> obj -> obj')
         txn.commit()
         del root.obj
         txn = transaction.get()
-        txn.note(u'root -X->')
+        txn.note('root -X->')
         txn.commit()
 
         storage_last_tid = conn._storage.lastTransaction()
@@ -204,7 +203,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         txn = tx_manager.begin()
         root2 = conn2.root()
         root2.extra = 0
-        txn.note(u'root.extra = 0')
+        txn.note('root.extra = 0')
         txn.commit()
 
         dest_last_tid = conn2._storage.lastTransaction()

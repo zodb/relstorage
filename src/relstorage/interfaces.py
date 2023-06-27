@@ -57,7 +57,7 @@ except ImportError: # pragma: no cover
     class Object(_Field):
         def __init__(self, schema, description=''):
             description = "%s (Must provide %s)" % (description, schema)
-            super(Object, self).__init__(description)
+            super().__init__(description)
 
     Bool = _Field
     Int = _Field
@@ -65,7 +65,7 @@ except ImportError: # pragma: no cover
     class Factory(_Field):
         def __init__(self, schema, description='', **kwargs):
             description = "%s (Must implement %s)" % (description, schema)
-            super(Factory, self).__init__(description, **kwargs)
+            super().__init__(description, **kwargs)
 
 
     IException = Interface
@@ -79,7 +79,7 @@ else:
             _Field.__init__(self, **kw)
 
         def _validate(self, value):
-            super(Factory, self)._validate(value)
+            super()._validate(value)
             if not self.schema.implementedBy(value):
                 raise _SchemaNotProvided(self.schema, value).with_field_and_value(self, value)
 
@@ -137,7 +137,7 @@ class IMVCCDatabaseViewer(Interface):
 
     highest_visible_tid = TID(
         description=(
-            u"""
+            """
             The identifier of the most recent transaction viewable to
             this component. A value of ``None`` means that we have no
             idea what transactions even exist.
@@ -167,7 +167,7 @@ class IDetachableMVCCDatabaseViewer(IMVCCDatabaseViewer):
     """
 
     detached = Bool(
-        description=u"Is this object detached?"
+        description="Is this object detached?"
     )
 
 class IMVCCDatabaseCoordinator(Interface):
@@ -204,7 +204,7 @@ class IMVCCDatabaseCoordinator(Interface):
 
     maximum_highest_visible_tid = TID(
         description=(
-            u"""
+            """
              Across all tracked components, report the current highest
              visible tid. This is the most recent transaction that can
              be seen in this process.
@@ -213,7 +213,7 @@ class IMVCCDatabaseCoordinator(Interface):
 
     minimum_highest_visible_tid = TID(
         description=(
-            u"""
+            """
              Across all tracked components, report the current minimum
              highest visible tid. This is the oldest transaction potentially
              being viewed in this process.
@@ -259,12 +259,12 @@ class POSKeyError(POSException.POSKeyError):
             extra = kwargs
         self.extra = extra
         if extra:
-            super(POSKeyError, self).__init__(oid_bytes, extra)
+            super().__init__(oid_bytes, extra)
         else:
-            super(POSKeyError, self).__init__(oid_bytes)
+            super().__init__(oid_bytes)
 
     def __str__(self):
-        s = super(POSKeyError, self).__str__()
+        s = super().__str__()
         if self.extra:
             s = "%s (%r)" % (s, self.extra)
         return s

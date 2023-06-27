@@ -29,6 +29,8 @@ from . import TestCase
 ROOT_OID = 0
 ROOT_KEY = 'myobj'
 
+# pylint:disable=protected-access
+
 def find_cache(obj):
     # Pass a connection, a storage, or the cache.
     storage = getattr(obj, '_storage', obj)

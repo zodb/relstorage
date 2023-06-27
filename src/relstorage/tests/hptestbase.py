@@ -40,6 +40,7 @@ from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import AbstractFromFileStorage
 from relstorage.tests.reltestbase import AbstractToFileStorage
 
+# pylint:disable=protected-access
 
 class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        TransactionalUndoStorage.TransactionalUndoStorage,
@@ -130,7 +131,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         #     OBJECTS * BATCHES modifications, followed by
         #     BATCHES undos
 
-        iter = s.iterator()
+        iter = s.iterator() # pylint:disable=redefined-builtin
         offset = 0
 
         eq = self.assertEqual
@@ -255,15 +256,15 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             r1['A'] = PersistentMapping()
             A_B = PersistentMapping()
             r1['A']['B'] = A_B
-            transaction.get().note(u'add A then add B to A')
+            transaction.get().note('add A then add B to A')
             transaction.commit()
 
             del r1['A']['B']
-            transaction.get().note(u'remove B from A')
+            transaction.get().note('remove B from A')
             transaction.commit()
 
             r1['A']['C'] = ''
-            transaction.get().note(u'add C (non-persistent) to A')
+            transaction.get().note('add C (non-persistent) to A')
             transaction.commit()
 
             packtime = c1._storage.lastTransactionInt()
@@ -385,7 +386,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         for i in range(5):
             tx = transaction.begin()
-            tx.description = u'Revision %s' % i
+            tx.description = 'Revision %s' % i
             root['key']['item'] = i
             transaction.commit()
 
@@ -471,7 +472,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
     def __maybe_ignore_monotonic(self, cls, method_name):
         if not self.__tid_clock_needs_care():
-            return getattr(super(HistoryPreservingRelStorageTests, self), method_name)()
+            return getattr(super(), method_name)()
 
         # Override one from RevisionStorage to go back to actually sleeping,
         # since our TID clock is external now.
@@ -486,6 +487,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         bound = lambda: unbound(self)
         self.__never_snoozing(bound)
+        return None
 
     def __never_snoozing(self, method):
         def never_snooze():
@@ -513,7 +515,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
     def checkSimpleHistory(self):
         if not self.__tid_clock_needs_care():
-            return super(HistoryPreservingRelStorageTests, self).checkSimpleHistory() # pylint:disable=no-member
+            return super().checkSimpleHistory() # pylint:disable=no-member
         # This assumes that the `time` value in the storage.history()
         # for an object always increases, even though there are 8-byte TID values
         # that, while themselves increasing, round down to equal floating point
@@ -585,7 +587,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertLess = lambda *args: None
 
         try:
-            super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()  # pylint:disable=no-member
+            return super().checkSimpleHistory()  # pylint:disable=no-member
         finally:
             del self.assertLess
 
@@ -594,7 +596,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                               find_packtime):
         # Ignore the pack timestamp given. Execute `find_packtime(storage)`
         # instead and use that.
-        meth = getattr(super(HistoryPreservingRelStorageTests, self), methname)
+        meth = getattr(super(), methname)
         if not self.__tid_clock_needs_care():
             return meth()
 

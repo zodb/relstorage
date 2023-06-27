@@ -38,6 +38,8 @@ from .util import RUNNING_ON_CI
 from . import TestCase
 from . import skipIfNoConcurrentWriters
 
+# pylint:disable=protected-access
+
 def WithAndWithoutInterleaving(func):
     # Expands a test case into two tests, for those that can run
     # both with the stored procs and without it.

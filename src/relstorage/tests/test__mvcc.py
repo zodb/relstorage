@@ -16,6 +16,8 @@ from . import TestCase
 
 MockViewer = mvcc.DetachableMVCCDatabaseViewer
 
+# pylint:disable=protected-access
+
 class TestDetachableMVCCDatabaseCoordinator(TestCase):
 
     def _makeOne(self):

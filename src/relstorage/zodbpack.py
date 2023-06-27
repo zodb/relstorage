@@ -25,7 +25,7 @@ from io import StringIO
 import ZConfig
 import ZODB.serialize
 
-schema_xml = u"""
+schema_xml = """
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
