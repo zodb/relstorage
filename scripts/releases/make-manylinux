@@ -55,7 +55,14 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     mkdir -p /cache/pip
     ls -ld /cache/pip
 
-    yum -y install ccache
+    if [ -e /usr/bin/yum ]; then
+        # manylinux
+        yum -y install ccache
+    fi
+    if [ -e /sbin/apk ]; then
+        # musllinux
+        apk add ccache
+    fi
 
     cd /RelStorage
     rm -rf wheelhouse
