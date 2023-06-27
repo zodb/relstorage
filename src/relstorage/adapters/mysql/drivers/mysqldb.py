@@ -113,7 +113,7 @@ class GeventMySQLdbDriver(GeventDriverMixin,
     # cursor_arraysize = 1024 # We inherit cursor_arraysize from the abstract driver.
 
     def __init__(self):
-        super(GeventMySQLdbDriver, self).__init__()
+        super().__init__()
         # Replace self._connect (which was MySQLdb.connect) with
         # direct call to our desired class.
         self._connect = self._get_connection_class()

@@ -114,6 +114,7 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         # pg8000 raises pg8000.dbapi.ProgrammingError, which is a DatabaseError.
         if isinstance(exc, self.driver_module.DatabaseError):
             return self._get_exception_pgcode(exc) == self.ERRCODE_DEADLOCK
+        return None
 
     def _get_exception_pgcode(self, exc):
         return exc.pgcode

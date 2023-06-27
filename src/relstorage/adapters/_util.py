@@ -66,7 +66,7 @@ def query_property(base_name,
             raise query
 
         if extension:
-            query = query + extension
+            query += extension
         if formatted:
             query = intern(query % inst.runner.script_vars)
 

@@ -290,7 +290,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         procedures = {}
         for proc_file_name in proc_files:
-            with open(proc_file_name, "rt") as f:
+            with open(proc_file_name, "rt", encoding='utf-8') as f:
                 source = f.read().strip()
             proc_name = os.path.splitext(os.path.basename(proc_file_name))[0]
             __traceback_info__ = proc_file_name, proc_name
@@ -755,12 +755,14 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
                     "If you need to convert, use the zodbconvert utility."
                 )
         else:
+            # pylint:disable-next=confusing-consecutive-elif,else-if-used
             if 'transaction' in tables and 'current_object' in tables:
                 raise StorageError(
                     "Schema mismatch: a history-free adapter "
                     "can not connect to a history-preserving database. "
                     "If you need to convert, use the zodbconvert utility."
                 )
+
         if 'blob_chunk' not in tables:
             raise StorageError(
                 "Schema mismatch; please create the blob_chunk tables. "
@@ -799,7 +801,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         # are picky about that and won't let you close a cursor without reading
         # everything.
         cursor.fetchall()
-
+        # pylint:disable=consider-using-any-or-all
         for column_descr in columns:
             if column_descr.name.lower() == 'is_empty':
                 # Yay, nothing to do.

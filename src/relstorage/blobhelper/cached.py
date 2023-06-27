@@ -97,7 +97,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
 
         assert options.blob_cache_size_check < 100
 
-        super(_LimitedCacheSizeMonitor, self).__init__(options)
+        super().__init__(options)
 
         self.blob_dir = options.blob_dir
         self.blob_cache_max_size = options.blob_cache_size
@@ -247,15 +247,16 @@ class _ExternalLimitedCacheSizeMonitor(_LimitedCacheSizeMonitor):
         import subprocess
         import sys
         try:
-            popen = subprocess.Popen([
+            with subprocess.Popen([
                 sys.executable,
                 "-m",
                 __name__,
                 blob_dir,
                 str(int(blob_cache_target_cleanup_size))
-            ])
-
-            popen.wait()
+            ]) as popen:
+                # This won't produce any output, so we don't need to worry about buffers
+                # filling up and using popen.communicate()
+                popen.wait()
         finally:
             # Pretend that we held the check lock, even if we're not
             # sure that we did. If we need to go again because we've already
@@ -294,7 +295,7 @@ class CacheBlobHelper(AbstractBlobHelper):
                 options.blob_dir, layout_name=_BlobCacheLayout.LAYOUT_NAME)
             fshelper.create()
 
-        super(CacheBlobHelper, self).__init__(options, adapter, fshelper)
+        super().__init__(options, adapter, fshelper)
 
         # All blob helpers for all instances of this storage share the
         # same cache_checker object.
@@ -310,7 +311,7 @@ class CacheBlobHelper(AbstractBlobHelper):
         self.new_instance_kwargs['cache_checker'] = self.cache_checker
 
     def close(self):
-        super(CacheBlobHelper, self).close()
+        super().close()
         try:
             self.cache_checker.close()
         except Exception: # pragma: no cover pylint:disable=broad-except
@@ -413,7 +414,7 @@ class CacheBlobHelper(AbstractBlobHelper):
         Although, it might be helpful as a size control?
         """
 
-    def _remove_old_revisions_of_stored_blobs(self, tid, total_size_stored):
+    def _remove_old_revisions_of_stored_blobs(self, tid, total_size_stored): # pylint:disable=too-many-locals
         """
         Prune old revisions of blobs that are not in use.
 
@@ -496,7 +497,7 @@ class CacheBlobHelper(AbstractBlobHelper):
             # finish() is bad, so don't do that.
             logger.exception("Failed to properly put blob cache files into place.")
         finally:
-            super(CacheBlobHelper, self).finish(tid)
+            super().finish(tid)
 
 
 class _BlobCacheLayout(object):
@@ -559,7 +560,7 @@ class _BlobCacheSizeChecker(timer):
     )
 
     def __init__(self, blob_dir, target_size, when_done=lambda _me, _holding_lock: None):
-        with open(os.path.join(blob_dir, ZODB.blob.LAYOUT_MARKER)) as layout_file:
+        with open(os.path.join(blob_dir, ZODB.blob.LAYOUT_MARKER), encoding='utf-8') as layout_file:
             layout = layout_file.read().strip()
 
         if layout != _BlobCacheLayout.LAYOUT_NAME:
@@ -591,7 +592,7 @@ class _BlobCacheSizeChecker(timer):
             except zc.lockfile.LockError:
                 # Someone is already cleaning up, so don't bother
                 logger.debug("Another thread is checking the blob cache size.")
-                return
+                return None
 
     def __size_blob_dir(self, is_cache_dir_name=re.compile(r'\d+$').match):
         # Calculate the sizes of the blobs stored in the blob_dir.

@@ -19,6 +19,10 @@ from .ast import resolved_against
 from .expressions import EmptyExpression
 
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
+
 class _SelectColumns(ColumnList):
 
     def __compile_visit__(self, compiler):
@@ -59,7 +63,7 @@ class Select(Query,
     _bind_vars_ignored = ('column_list',)
 
     def _bound_to(self, context, dialect):
-        super(Select, self)._bound_to(context, dialect)
+        super()._bound_to(context, dialect)
         if self.columns:
             # Need to re-resolve, it's possible our table changed.
             self.column_list = _SelectColumns(
@@ -67,7 +71,11 @@ class Select(Query,
             )
         return self
 
-    def order_by(self, expression, dir=None):
+    # All these methods work o na copy of self,
+    # but pylint thinks they are unrelated objects
+    # pylint:disable=protected-access
+
+    def order_by(self, expression, dir=None): # pylint:disable=redefined-builtin
         expression = expression.resolve_against(self.table)
         s = copy(self)
         s._order_by = OrderBy(expression, dir)

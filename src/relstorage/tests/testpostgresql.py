@@ -29,6 +29,8 @@ from .util import DEFAULT_DATABASE_SERVER_HOST
 from . import StorageCreatingMixin
 from . import TestCase
 
+# pylint:disable=protected-access
+
 class PostgreSQLAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
@@ -53,7 +55,7 @@ class PostgreSQLAdapterMixin(object):
         return dsn
 
     def get_adapter_zconfig(self):
-        return u"""
+        return """
         <postgresql>
             driver %s
             dsn %s
@@ -138,6 +140,7 @@ class TestBlobFunctionality(
     REALLY_EXHAUST_SHARED_MEMORY = False
 
     def test_zapping_with_many_blobs(self):
+        # pylint:disable=too-many-locals
         # https://github.com/zodb/relstorage/issues/468
         # If a database has many blobs (more than 4600 by default)
         # it couldn't be zapped.
@@ -207,7 +210,7 @@ class TestGenerateTIDPG(PostgreSQLAdapterMixin,
     # pylint:disable=too-many-ancestors
 
     def setUp(self):
-        super(TestGenerateTIDPG, self).setUp()
+        super().setUp()
         self._storage = self._closing(self.make_storage())
 
     def test_extract_parts(self):
@@ -283,7 +286,7 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     def __init__(self):
         from relstorage.adapters.postgresql import drivers
-        super(PostgreSQLTestSuiteBuilder, self).__init__(
+        super().__init__(
             drivers,
             PostgreSQLAdapterMixin,
             extra_test_classes=(TestBlobFunctionality, TestGenerateTIDPG)

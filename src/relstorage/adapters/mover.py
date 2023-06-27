@@ -197,8 +197,7 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
         """
         self._get_tid_after_query.execute(cursor, (oid, tid))
         row = cursor.fetchone()
-        if row:
-            return row[0]
+        return row[0] if row else None
 
     _current_object_tids_queries = (
         (('zoid', 'tid'), 'current_object', 'zoid'),
@@ -354,20 +353,19 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
                 command=command,
                 suffix=suffix
             )
-        else:
+        elif data:
             # history free can only delete the entire record.
-            if data:
-                batcher.insert_into(
-                    "object_state (zoid, tid, state_size, state)",
-                    "%s, %s, %s, %s",
-                    (oid, tid, size, encoded),
-                    rowkey=oid,
-                    size=size,
-                    command=command,
-                    suffix=suffix
-                )
-            else:
-                batcher.delete_from('object_state', zoid=oid)
+            batcher.insert_into(
+                "object_state (zoid, tid, state_size, state)",
+                "%s, %s, %s, %s",
+                (oid, tid, size, encoded),
+                rowkey=oid,
+                size=size,
+                command=command,
+                suffix=suffix
+            )
+        else:
+            batcher.delete_from('object_state', zoid=oid)
 
     def restore(self, cursor, batcher, oid, tid, data):
         raise NotImplementedError()
@@ -574,7 +572,7 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
                     break
 
                 if f is None:
-                    f = open(filename, 'wb')
+                    f = open(filename, 'wb') # pylint:disable=consider-using-with
 
                 f.write(chunk)
                 bytecount += len(chunk)

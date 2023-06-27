@@ -42,7 +42,7 @@ class SharedBlobHelper(AbstractBlobHelper):
             # Share files over NFS or similar
             fshelper = ZODB.blob.FilesystemHelper(options.blob_dir)
             fshelper.create()
-        super(SharedBlobHelper, self).__init__(options, adapter, fshelper)
+        super().__init__(options, adapter, fshelper)
 
     def _loadBlobInternal(self, cursor, oid, serial, blob_lock=None):
         blob_filename = self._cachedLoadBlobInternal(oid, serial)
@@ -88,7 +88,7 @@ class SharedBlobHelper(AbstractBlobHelper):
         names = os.listdir(dirname)
         if not names:
             return False
-        for name in names:
+        for name in names: # pylint:disable=consider-using-any-or-all
             if not name.startswith('.'):
                 return True
         return False

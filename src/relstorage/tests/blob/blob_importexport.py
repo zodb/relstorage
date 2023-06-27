@@ -24,10 +24,12 @@ from persistent.mapping import PersistentMapping
 
 from . import TestBlobMixin
 
+# pylint:disable=protected-access
+
 class TestBlobImportExportMixin(TestBlobMixin):
 
     def setUp(self):
-        super(TestBlobImportExportMixin, self).setUp()
+        super().setUp()
         self.database1 = self.database
         self.storage2 = self.create_storage('2')
         self.database2 = DB(self.storage2)
@@ -35,7 +37,7 @@ class TestBlobImportExportMixin(TestBlobMixin):
     def tearDown(self):
         self.database2.close()
         self.storage2.close()
-        super(TestBlobImportExportMixin, self).tearDown()
+        super().tearDown()
 
     def testExport(self):
         # Create our root object for database1:

@@ -29,18 +29,19 @@ from ZODB.serialize import referencesf
 
 from .reltestbase import RelStorageTestBase
 
+# pylint:disable=protected-access
 
 class TestPackBase(RelStorageTestBase):
     # pylint:disable=abstract-method
 
     def setUp(self):
-        super(TestPackBase, self).setUp()
+        super().setUp()
         self.main_db = self._closing(DB(self._storage))
 
     def tearDown(self):
         self.main_db.close()
         self.main_db = None
-        super(TestPackBase, self).tearDown()
+        super().tearDown()
 
     OID_ROOT = 0
     OID_A = 1

@@ -38,7 +38,7 @@ class OracleRowBatcher(RowBatcher):
     row_limit = 999
 
     def __init__(self, cursor, inputsizes, row_limit=None):
-        super(OracleRowBatcher, self).__init__(cursor, row_limit)
+        super().__init__(cursor, row_limit)
         self.inputsizes = inputsizes
         self.array_ops = {}  # {(operation, row_schema): {rowkey: [row]}}
 

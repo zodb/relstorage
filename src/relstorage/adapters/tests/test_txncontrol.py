@@ -27,6 +27,8 @@ from relstorage.tests import MockPoller
 
 from ..interfaces import ITransactionControl
 
+# pylint:disable=protected-access
+
 class MockStoreConnection(object):
 
     def __init__(self, conn):
@@ -68,14 +70,14 @@ class TestTransactionControl(TestCase):
         inst = self._makeOne()
         cur = MockCursor(self)
         __traceback_info__ = inst.__dict__
-        inst.add_transaction(cur, 1, u'user', u'desc', u'ext')
+        inst.add_transaction(cur, 1, 'user', 'desc', 'ext')
         self.assertEqual(
             cur.executed.pop(),
             (str(inst._add_transaction_query),
              (1, False, b'user', b'desc', b'ext'))
         )
 
-        inst.add_transaction(cur, 1, u'user', u'desc', u'ext', packed=True)
+        inst.add_transaction(cur, 1, 'user', 'desc', 'ext', packed=True)
 
         self.assertEqual(
             cur.executed.pop(),

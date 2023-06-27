@@ -80,7 +80,7 @@ class NoOverheadSizeCache(Cache):
 
     @property
     def weight(self):
-        weight = super(NoOverheadSizeCache, self).size
+        weight = super().size
         weight -= self.base_size
         weight -= self.entry_size * len(self)
         return weight
@@ -91,8 +91,7 @@ class NoOverheadSizeCache(Cache):
 
     def __getitem__(self, oid):
         entry = Cache.__getitem__(self, oid)
-        if entry is not None:
-            return self.get_item_with_tid(oid, entry.tid)
+        return self.get_item_with_tid(oid, entry.tid) if entry is not None else None
 
 
 class GenericLRUCacheTests(TestCase):
@@ -259,7 +258,7 @@ class GenericGenerationalLRUCacheTests(GenericLRUCacheTests):
     """
 
     def test_implements(self):
-        cache = super(GenericGenerationalLRUCacheTests, self).test_implements()
+        cache = super().test_implements()
         assert_that(cache.eden,
                     validly_provides(interfaces.IGeneration))
         assert_that(cache.protected,

@@ -16,12 +16,8 @@ from relstorage.options import Options
 from relstorage.adapters.sql import DefaultDialect
 from relstorage.adapters.interfaces import ReplicaClosedException
 
-try:
-    from unittest import mock as _mock
-except ImportError: # Python 2
-    import mock as _mock
+# pylint:disable=protected-access
 
-mock = _mock
 
 @contextlib.contextmanager
 def _fakeSubTest(*_args, **_kwargs):
@@ -59,7 +55,7 @@ class TestCase(unittest.TestCase):
     none = unittest.TestCase.assertIsNone
 
     def setUp(self):
-        super(TestCase, self).setUp()
+        super().setUp()
         # This is done by ZODB.tests.util.TestCase, but
         # not stored anywhere.
         # XXX: As of ZODB 5.5.1, that class also doesn't handle
@@ -125,7 +121,7 @@ class TestCase(unittest.TestCase):
         try:
             transaction.abort()
         finally:
-            super(TestCase, self).tearDown()
+            super().tearDown()
 
     def assertIsEmpty(self, container, msg=None):
         self.assertLength(container, 0, msg)

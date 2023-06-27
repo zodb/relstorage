@@ -44,7 +44,7 @@ from relstorage.cache.persistence import sqlite_files
 from relstorage.cache.persistence import FAILURE_TO_OPEN_DB_EXCEPTIONS
 from relstorage.cache.local_database import Database
 
-from relstorage.cache import cache
+from relstorage.cache import cache # pylint:disable=no-name-in-module
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -102,13 +102,13 @@ class ICachedValue(ILRUEntry):
     # pylint:disable=arguments-differ
 
     weight = Int(
-        description=u"""The cost (size) of this cached value.""")
+        description="""The cost (size) of this cached value.""")
 
     max_tid = Int(
-        description=u"""The newest TID cached for the object."""
+        description="""The newest TID cached for the object."""
     )
 
-    newest_value = interface.Attribute(u"The ``(state, tid)`` pair that is the newest.")
+    newest_value = interface.Attribute("The ``(state, tid)`` pair that is the newest.")
 
     def get_if_tid_matches(tid):
         """
@@ -214,13 +214,13 @@ class LocalClient(object):
         compression_module = options.cache_local_compression
         try:
             compression_markers = self._compression_markers[compression_module]
-        except KeyError:
-            raise ValueError("Unknown compression module")
-        else:
-            self.__compression_marker = compression_markers[0]
-            self.__compress = compression_markers[1]
-            if self.__compress is None:
-                self._compress = None
+        except KeyError as exc:
+            raise ValueError("Unknown compression module") from exc
+
+        self.__compression_marker = compression_markers[0]
+        self.__compress = compression_markers[1]
+        if self.__compress is None:
+            self._compress = None
 
     @property
     def size(self):
@@ -259,19 +259,21 @@ class LocalClient(object):
     @_log_timed
     def save(self, object_index=None, checkpoints=None, **sqlite_args):
         options = self.options
-        if options.cache_local_dir and self.size > self.__initial_weight:
-            try:
-                conn = sqlite_connect(options, self.prefix,
-                                      **sqlite_args)
-            except FAILURE_TO_OPEN_DB_EXCEPTIONS:
-                logger.exception("Failed to open sqlite to write")
-                return 0
+        if not options.cache_local_dir or self.size <= self.__initial_weight:
+            return None
 
-            with closing(conn):
-                self.write_to_sqlite(conn, checkpoints, object_index)
-            # Testing: Return a signal when we tried to write
-            # something.
-            return 1
+        try:
+            conn = sqlite_connect(options, self.prefix,
+                                  **sqlite_args)
+        except FAILURE_TO_OPEN_DB_EXCEPTIONS:
+            logger.exception("Failed to open sqlite to write")
+            return 0
+
+        with closing(conn):
+            self.write_to_sqlite(conn, checkpoints, object_index)
+        # Testing: Return a signal when we tried to write
+        # something.
+        return 1
 
     def restore(self):
         """
@@ -281,14 +283,16 @@ class LocalClient(object):
         there was no data.
         """
         options = self.options
-        if options.cache_local_dir:
-            try:
-                conn = sqlite_connect(options, self.prefix)
-            except FAILURE_TO_OPEN_DB_EXCEPTIONS:
-                logger.exception("Failed to read data from sqlite")
-                return
-            with closing(conn):
-                return self.read_from_sqlite(conn)
+        if not options.cache_local_dir:
+            return None
+
+        try:
+            conn = sqlite_connect(options, self.prefix)
+        except FAILURE_TO_OPEN_DB_EXCEPTIONS:
+            logger.exception("Failed to read data from sqlite")
+            return None
+        with closing(conn):
+            return self.read_from_sqlite(conn)
 
     @_log_timed
     def remove_invalid_persistent_oids(self, bad_oids):
@@ -372,9 +376,11 @@ class LocalClient(object):
         # Recall that for deleted objects, `state` can be None.
         # TODO: This is making a copy of the string from C++ even if we
         # don't need to decompress.
-        if value is not None:
-            state, tid = value
-            return ((decompress(state) if state else state), tid)
+        if value is None:
+            return None
+
+        state, tid = value
+        return ((decompress(state) if state else state), tid)
 
     __getitem__ = get
 
@@ -397,9 +403,9 @@ class LocalClient(object):
         operations = self._cache.hits + self._cache.sets
         if operations - self._aged_at < age_period:
             self._next_age_at = age_period
-            return
+            return None
         if self.size < self.limit:
-            return
+            return None
 
         self._aged_at = operations
         now = time.time()

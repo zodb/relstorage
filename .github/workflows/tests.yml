@@ -165,13 +165,12 @@ jobs:
         with:
           name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
           path: dist/*whl
-      # XXX: Temp comment out linting until tests run again.
-      # - name: lint
-      #   if: matrix.python-version == '3.11' && startsWith(runner.os, 'Linux')
-      #   # At this writing, PyLint 2.17/astroid 2.15 won't work on 3.12
-      #   run: |
-      #     pip install -U pylint
-      #     python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
+      - name: lint
+        if: matrix.python-version == '3.11' && startsWith(runner.os, 'Linux')
+        # At this writing, PyLint 2.17/astroid 2.15 won't work on 3.12
+        run: |
+          pip install -U pylint
+          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
       - name: Initialize Test Databases
         if: startsWith(runner.os, 'macOS')
         run: |

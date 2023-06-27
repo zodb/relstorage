@@ -32,7 +32,7 @@ from ZODB.utils import u64
 from ZODB.interfaces import IStorageIteration
 from ZODB.interfaces import IStorageCurrentRecordIteration
 
-schema_xml = u"""
+schema_xml = """
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
@@ -100,7 +100,7 @@ def open_storages(options):
     return source, destination
 
 def main(argv=None):
-    # pylint:disable=too-many-branches,too-many-statements
+    # pylint:disable=too-many-branches,too-many-statements,too-complex
     if argv is None:
         argv = sys.argv
     parser = argparse.ArgumentParser(description=__doc__)

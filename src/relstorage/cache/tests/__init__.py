@@ -9,13 +9,22 @@ from __future__ import print_function
 
 from zope import interface
 
-from relstorage.cache.cache import PyCache as _BaseCache # pylint:disable=no-name-in-module
+from relstorage.cache.cache import PyCache as _BaseCache # pylint:disable=no-name-in-module,import-error
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 from relstorage.tests import MockOptions
 from relstorage.tests import MockCursor
 from relstorage.tests import MockConnectionManager
 from relstorage.tests import MockAdapter
+
+__all__ = (
+    # re-exported
+    'MockAdapter',
+    'MockCursor',
+    'MockConnectionManager',
+    'Cache',
+    'MockOptionsWithFakeMemcache',
+)
 
 class MockOptionsWithFakeMemcache(MockOptions):
     cache_module_name = 'relstorage.tests.fakecache'
@@ -69,7 +78,7 @@ class LocalClient(_BaseLocalClient):
     def __init__(self, options, prefix=None):
         if isinstance(options, int):
             options = MockOptions(cache_local_mb=options)
-        super(LocalClient, self).__init__(options, prefix=prefix)
+        super().__init__(options, prefix=prefix)
 
 def list_lrukeys(mapping, generation_name):
     # Remember, these lists will be from LRU to MRU

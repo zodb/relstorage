@@ -427,7 +427,7 @@ def byte_display(size):
     """
     Returns a string with the correct unit (KB, MB), given the size in bytes.
     """
-    if size == 0:
+    if not size:
         return '0 KB'
     if size <= 1024:
         return '%s bytes' % size
@@ -531,7 +531,7 @@ class CloseTracker(object): # pragma: no cover
     def __setattr__(self, name, value):
         if name in CloseTracker.__slots__:
             object.__setattr__(self, name, value)
-            return
+            return None
         return setattr(self._tracked, name, value)
 
     def close(self):
@@ -573,7 +573,7 @@ class NeedsFetchallBeforeCloseCursor(CloseTrackerCursor): # pragma: no cover
     def close(self):
         if self.needs_fetchall:
             raise AssertionError("Forgot to fetchall")
-        super(NeedsFetchallBeforeCloseCursor, self).close()
+        super().close()
 
     def execute(self, stmt, args=None):
         if self.needs_fetchall:

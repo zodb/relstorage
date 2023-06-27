@@ -163,6 +163,7 @@ class stale_aware(object):
 
 
 def _make_phase_dependent(storage, method):
+    # pylint:disable=protected-access
     aborts_early = getattr(method, 'aborts_early', False)
     if aborts_early:
         @wraps(method)
@@ -181,6 +182,7 @@ def _make_phase_dependent(storage, method):
 def make_cannot_write(storage, bound_method):
     @wraps(bound_method)
     def read_only(*args, **kwargs):
+        # pylint:disable=protected-access
         raise storage._read_only_error
     return read_only
 

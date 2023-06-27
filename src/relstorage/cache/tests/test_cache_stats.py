@@ -53,7 +53,7 @@ def _send_queue(self, tid_int, temp_objects):
 
 now = 0
 
-def cache_run(name, size):
+def cache_run(name, size): # pylint:disable=too-many-locals
     history = _build_history()
     serial = 1
     #random.seed(42)

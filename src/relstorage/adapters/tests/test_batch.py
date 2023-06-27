@@ -353,7 +353,7 @@ class RowBatcherTests(TestCase):
 
 
     def test_select_from_timeout(self):
-        from relstorage.tests import mock
+        from unittest import mock
         from relstorage.adapters.interfaces import AggregateOperationTimeoutError
         cursor = MockCursor()
         cursor.sort_sequence_params = True

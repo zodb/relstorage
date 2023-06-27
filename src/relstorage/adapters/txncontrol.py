@@ -70,7 +70,7 @@ class GenericTransactionControl(AbstractTransactionControl):
     """
 
     def __init__(self, connmanager, poller, keep_history, Binary):
-        super(GenericTransactionControl, self).__init__(connmanager)
+        super().__init__(connmanager)
         self.poller = poller
         self.keep_history = keep_history
         self.Binary = Binary

@@ -106,7 +106,7 @@ class MySQLAdapter(AbstractAdapter):
         self.connmanager = connmanager
         self.locker = locker
         self.mover = mover
-        super(MySQLAdapter, self).__init__(options)
+        super().__init__(options)
 
     def _create(self):
         options = self.options
@@ -233,7 +233,7 @@ class MySQLAdapter(AbstractAdapter):
         args = ()
         if self.keep_history:
             # (packed, username, descr, extension)
-            proc = proc + '(%s, %s, %s, %s)'
+            proc += '(%s, %s, %s, %s)'
             args = (False, username, description, extension)
 
         multi_results = self.driver.callproc_multi_result(cursor, proc, args)
@@ -252,7 +252,7 @@ class MySQLAdapter(AbstractAdapter):
         if not self.version_detector.supports_good_stored_procs(store_connection.cursor):
             # XXX: When can we drop this? Probably not until AppVeyor upgrades
             # MySQL past 5.7.12.
-            return super(MySQLAdapter, self).lock_database_and_move(
+            return super().lock_database_and_move(
                 store_connection, load_connection,
                 transaction_has_blobs,
                 ude,

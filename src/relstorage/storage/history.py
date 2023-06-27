@@ -57,15 +57,15 @@ class History(object):
 
     @stale_aware
     @storage_method
-    def history(self, oid, version=None, size=1, filter=None):
+    def history(self, oid, version=None, size=1, filter=None): # pylint:disable=redefined-builtin
         # pylint:disable=unused-argument,too-many-locals
         cursor = self.load_connection.cursor
         oid_int = bytes8_to_int64(oid)
         try:
             history = self.adapter.dbiter.iter_object_history(
                 cursor, oid_int)
-        except KeyError:
-            raise POSKeyError(oid)
+        except KeyError as ex:
+            raise POSKeyError(oid) from ex
 
         res = []
         for entry in history:
@@ -115,7 +115,7 @@ class UndoableHistory(History):
 
     @stale_aware
     @storage_method
-    def undoLog(self, first=0, last=-20, filter=None):
+    def undoLog(self, first=0, last=-20, filter=None): # pylint:disable=redefined-builtin
         if last < 0:
             last = first - last
 

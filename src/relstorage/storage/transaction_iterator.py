@@ -120,7 +120,7 @@ class HistoryPreservingTransactionIterator(_TransactionIterator):
 
     def __init__(self, adapter, start, stop):
         self._conn = load_connection = LoadConnection(adapter.connmanager)
-        super(HistoryPreservingTransactionIterator, self).__init__(
+        super().__init__(
             adapter, load_connection, start, stop)
 
     def close(self):
@@ -129,7 +129,7 @@ class HistoryPreservingTransactionIterator(_TransactionIterator):
                 self._conn.drop()
         finally:
             self._conn = None
-            super(HistoryPreservingTransactionIterator, self).close()
+            super().close()
 
 
 class HistoryFreeTransactionIterator(_TransactionIterator):

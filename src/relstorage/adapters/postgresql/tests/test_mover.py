@@ -24,6 +24,8 @@ from relstorage.tests import MockDriver
 
 from .. import mover
 
+# pylint:disable=protected-access
+
 class PGMockDriver(MockDriver):
     supports_copy = False
 

@@ -46,7 +46,7 @@ class MemcacheStateCache(object):
         if they so request.
         """
         if not options.cache_servers:
-            return
+            return None
         module_name = options.cache_module_name
         module = importlib.import_module(module_name)
         servers = options.cache_servers
@@ -83,6 +83,7 @@ class MemcacheStateCache(object):
             if data and len(data) >= 8:
                 actual_tid_int = u64(data[:8])
                 return data[8:], actual_tid_int
+        return None
 
     get = __getitem__
 
@@ -136,17 +137,19 @@ class MemcacheStateCache(object):
 
     def get_checkpoints(self):
         s = self.client.get(self.checkpoints_key)
-        if s:
-            try:
-                c0, c1 = s.split()
-                c0 = int(c0)
-                c1 = int(c1)
-            except ValueError:
-                # Invalid checkpoint cache value; ignore it.
-                pass
-            else:
-                # More validation
-                return (c0, c1) if c0 >= c1 else None
+        if not s:
+            return None
+
+        try:
+            c0, c1 = s.split()
+            c0 = int(c0)
+            c1 = int(c1)
+        except ValueError:
+            # Invalid checkpoint cache value; ignore it.
+            return None
+
+        # More validation
+        return (c0, c1) if c0 >= c1 else None
 
     def replace_checkpoints(self, expected, change_to):
         cp = self.get_checkpoints()

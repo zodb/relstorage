@@ -21,6 +21,9 @@ from .expressions import AssignmentExpression
 from .expressions import EmptyExpression
 from .expressions import Expression
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
 class _ValuesPlaceholderList(ColumnList):
     pass
 
@@ -33,7 +36,7 @@ class Insert(Query):
 #    values = None
 
     def __init__(self, table, *columns):
-        super(Insert, self).__init__()
+        super().__init__()
         self.table = table
 
         if columns:
@@ -89,7 +92,7 @@ class Insert(Query):
                 if IOrderedBindParam.providedBy(source) # pylint:disable=no-value-for-parameter
             ]
             return dialect.datatypes_for_columns(columns_with_params)
-
+        return None
 
 class _ExcludedColumn(Expression):
 
@@ -144,7 +147,7 @@ class Upsert(Insert):
         compiler.emit_keyword_upsert()
 
     def _visit_select(self, compiler):
-        super(Upsert, self)._visit_select(compiler)
+        super()._visit_select(compiler)
         compiler.visit_upsert_after_select(self.select)
 
     def __compile_visit__(self, compiler):
@@ -154,7 +157,7 @@ class Upsert(Insert):
             upsert_compiler.visit_upsert(self)
 
     def __compile_visit_for_upsert__(self, compiler):
-        super(Upsert, self).__compile_visit__(compiler)
+        super().__compile_visit__(compiler)
         compiler.visit_upsert_conflict_column(self.conflict_column)
         compiler.visit_upsert_conflict_update(self.update_clause)
 
@@ -169,12 +172,13 @@ class Delete(Query, WhereMixin):
     _limit = None
 
     def __init__(self, table):
-        super(Delete, self).__init__()
+        super().__init__()
         self.table = table
         self._where = None
 
     def limit(self, literal):
         s = copy(self)
+        # pylint:disable=protected-access
         s._limit = literal
         return s
 
@@ -188,7 +192,7 @@ class Delete(Query, WhereMixin):
 class Truncate(Query):
 
     def __init__(self, table):
-        super(Truncate, self).__init__()
+        super().__init__()
         self.table = table
 
     def __compile_visit__(self, compiler):

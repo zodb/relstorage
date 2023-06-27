@@ -42,7 +42,7 @@ class cx_OracleDriver(AbstractModuleDriver):
     dialect = OracleDialect()
 
     def __init__(self):
-        super(cx_OracleDriver, self).__init__()
+        super().__init__()
 
         cx_Oracle = self.driver_module
 

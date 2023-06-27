@@ -55,6 +55,7 @@ class DefaultDialect(object):
         keep_history = context.keep_history
         new = copy(self)
         new.keep_history = keep_history
+        # pylint:disable-next=protected-access
         new._context_repr = repr(context)
         return new
 
@@ -85,6 +86,9 @@ class DefaultDialect(object):
         if isinstance(other, DefaultDialect):
             return other.keep_history == self.keep_history
         return NotImplemented # pragma: no cover
+
+    def __hash__(self): # pragma: no cover
+        return hash(self.keep_history)
 
     def __repr__(self):
         return "<%s at %x keep_history=%s context=%s>" % (
@@ -510,6 +514,7 @@ class DialectAware(object):
         assert dialect is not None
 
         new = copy(self)
+        # pylint:disable-next=protected-access
         return new._bound_to(context, dialect)
 
     _bind_vars_ignored = ()

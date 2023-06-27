@@ -13,13 +13,15 @@ import transaction
 
 from . import TestBlobMixin
 
+# pylint:disable=protected-access
+
 class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
     """
     We need a database with an undoing blob supporting storage.
     """
 
     def setUp(self):
-        super(TestBlobPackHistoryPreservingMixin, self).setUp()
+        super().setUp()
         # The 8 bytes for each TID up to BLOB_REVISION_COUNT
         self.tids = []
         # The timestamps taken just *before* the corresponding
@@ -130,6 +132,5 @@ class TestBlobPackHistoryFreeMixin(TestBlobPackHistoryPreservingMixin):
         # everything; there's really only one file name.
         remaining_fns = fns
         if count == self.BLOB_REVISION_COUNT:
-            s = super(TestBlobPackHistoryFreeMixin, self)
-            remaining_fns = s._checkFirstCountNotExist(count, fns)
+            remaining_fns = super()._checkFirstCountNotExist(count, fns)
         return remaining_fns

@@ -74,6 +74,9 @@ class _StoredFunction(object):
             return NotImplemented
         return self.name == other.name and self.checksum == other.checksum
 
+    def __hash__(self):
+        return hash((self.name, self.checksum))
+
 
 @implementer(ISchemaInstaller)
 class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
@@ -84,12 +87,12 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def __init__(self, options, connmanager, runner, locker):
         self.options = options
-        super(PostgreSQLSchemaInstaller, self).__init__(
+        super().__init__(
             connmanager, runner, options.keep_history)
         self.locker = locker
 
     def _read_proc_files(self):
-        procs = super(PostgreSQLSchemaInstaller, self)._read_proc_files()
+        procs = super()._read_proc_files()
         # Convert from bare strings into _StoredFunction objects
         # (which are missing their signatures at this point).
         current_object = 'current_object' if self.keep_history else 'object_state'
@@ -125,7 +128,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     @connection_callback(inherit=AbstractSchemaInstaller._prepare_with_connection)
     def _prepare_with_connection(self, conn, cursor):
-        super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
+        super()._prepare_with_connection(conn, cursor)
 
         # Do we need to merge blob chunks?
         if not self.options.shared_blob_dir:
@@ -314,7 +317,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 # Trigger deletion of blob OIDs.
                 cursor.execute("DELETE FROM blob_chunk")
         self.connmanager.open_and_call(delete_blob_chunk)
-        super(PostgreSQLSchemaInstaller, self).drop_all()
+        super().drop_all()
 
     def _create_pack_lock(self, cursor):
         return
@@ -346,7 +349,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     _zap_all_tbl_stmt = 'TRUNCATE TABLE %s CASCADE'
 
     def _before_zap_all_tables(self, conn, cursor, tables, slow=False):
-        super(PostgreSQLSchemaInstaller, self)._before_zap_all_tables(conn, cursor, tables, slow)
+        super()._before_zap_all_tables(conn, cursor, tables, slow)
         if not slow and 'blob_chunk' in tables:
             # If we're going to be truncating, it's important to
             # remove the large objects through lo_unlink. We have a

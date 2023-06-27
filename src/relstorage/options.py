@@ -213,6 +213,14 @@ class Options(object):
         return all(getattr(self, key) == getattr(other, key)
                    for key in self.valid_option_names())
 
+    def __hash__(self):
+        # We don't expect to hash these. But if you define __eq__,
+        # you should also define __hash__, because equal objects MUST have
+        # equal hashes. We can meet that requirement with poor efficiency by
+        # using a constant hash (because who knows if our sub-objects
+        # are hashable).
+        return 42
+
     def copy(self, **kw):
         """
         Produce a copy of these options, with keyword arguments overriding.

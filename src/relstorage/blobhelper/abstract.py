@@ -117,13 +117,15 @@ class AbstractBlobHelper(object):
         # a maximum size could remove the blob file by the time the caller
         # gets the filename, so it could be gone.
         blob_filename = self.fshelper.getBlobFilename(oid, serial)
-        if os.path.exists(blob_filename):
-            return self._accessed(blob_filename)
+        if not os.path.exists(blob_filename):
+            return None
+
+        return self._accessed(blob_filename)
 
     def _openCommittedBlobFileInternal(self, cursor, oid, serial, blob, open_lock):
         blob_filename = self._loadBlobInternal(cursor, oid, serial, open_lock)
         if blob is None:
-            result = open(blob_filename, 'rb')
+            result = open(blob_filename, 'rb') # pylint:disable=consider-using-with
         else:
             result = ZODB.blob.BlobFile(blob_filename, 'r', blob)
         return result

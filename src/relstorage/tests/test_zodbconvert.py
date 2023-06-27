@@ -32,6 +32,7 @@ from ZODB.tests.util import TestCase
 
 from relstorage.zodbconvert import main
 
+# pylint:disable=protected-access
 
 def skipIfZapNotSupportedByDest(func):
     @functools.wraps(func)
@@ -48,7 +49,7 @@ class AbstractZODBConvertBase(TestCase):
     zap_supported_by_dest = False
 
     def setUp(self):
-        super(AbstractZODBConvertBase, self).setUp()
+        super().setUp()
         self._to_close = []
         self.__src_db = None
         self.__dest_db = None
@@ -88,7 +89,7 @@ class AbstractZODBConvertBase(TestCase):
         # 2.5.0 and 5.3.
         gc.collect()
         gc.collect()
-        super(AbstractZODBConvertBase, self).tearDown()
+        super().tearDown()
 
     def close_all_registered(self):
         for i in self._to_close:
@@ -344,7 +345,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
     keep_history = True
 
     def setUp(self):
-        super(FSZODBConvertTests, self).setUp()
+        super().setUp()
 
         fd, self.srcfile = tempfile.mkstemp('.fssource')
         os.close(fd)
@@ -405,7 +406,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         for dname in self.src_blobs, self.dest_blobs:
             if os.path.exists(dname):
                 _rm(dname, rmtree)
-        super(FSZODBConvertTests, self).tearDown()
+        super().tearDown()
 
     def _load_zconfig(self):
         from relstorage.zodbconvert import schema_xml
@@ -439,16 +440,16 @@ class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
 
     def _cfg_source(self):
         return ("\n<zlibstorage source>"
-                + super(ZlibWrappedFSZODBConvertTests, self)._cfg_source()
+                + super()._cfg_source()
                 + "</zlibstorage>")
 
     def _cfg_dest(self):
         return ("\n<zlibstorage destination>"
-                + super(ZlibWrappedFSZODBConvertTests, self)._cfg_dest()
+                + super()._cfg_dest()
                 + "</zlibstorage>")
 
     def deep_compare_current_states(self):
-        super(ZlibWrappedFSZODBConvertTests, self).deep_compare_current_states()
+        super().deep_compare_current_states()
         from zc.zlibstorage import compress
 
         # Verify that both source and destination were compressed.

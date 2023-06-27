@@ -10,6 +10,9 @@ from __future__ import print_function
 from .expressions import Expression
 from .schema import Column
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
 class _Functions(object):
 
     def max(self, column):

@@ -147,7 +147,7 @@ class RelStorage(LegacyMethodsMixin,
                  options=None, cache=None, blobhelper=None,
                  store_connection_pool=None,
                  **kwoptions):
-        # pylint:disable=too-many-branches, too-many-statements
+        # pylint:disable=too-many-branches, too-many-statements, too-complex, too-many-locals
         if options and kwoptions:
             raise TypeError("The RelStorage constructor accepts either "
                             "an options parameter or keyword arguments, not both")
@@ -274,10 +274,12 @@ class RelStorage(LegacyMethodsMixin,
         )
 
     def new_instance(self, before=None):
-        """Creates and returns another storage instance.
+        """
+        Creates and returns another storage instance.
 
         See ZODB.interfaces.IMVCCStorage.
         """
+        # pylint:disable=protected-access
         options = self._options
         if before and not self._options.read_only:
             options = self._options.new_instance(read_only=True)
@@ -446,7 +448,7 @@ class RelStorage(LegacyMethodsMixin,
         wrapper.copyTransactionsFrom = self.copyTransactionsFrom
 
         # Prior to ZODB 4.3.1, ConflictResolvingStorage would raise an AttributeError
-        super(RelStorage, self).registerDB(wrapper)
+        super().registerDB(wrapper)
 
     def isReadOnly(self):
         return self._is_read_only
@@ -485,8 +487,8 @@ class RelStorage(LegacyMethodsMixin,
             except:
                 self.tpc_abort(transaction, _force=True)
                 raise
-            else:
-                self._tpc_phase = next_phase
+
+            self._tpc_phase = next_phase
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -507,9 +509,9 @@ class RelStorage(LegacyMethodsMixin,
             # Only do that for really unexpected exceptions.
             self.tpc_abort(transaction, _force=True)
             raise
-        else:
-            self._tpc_phase = next_phase
-            return next_phase.invalidated_oids
+
+        self._tpc_phase = next_phase
+        return next_phase.invalidated_oids
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
@@ -595,7 +597,7 @@ class RelStorage(LegacyMethodsMixin,
             for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
                 yield record
 
-    def record_iternext(self, next=None):
+    def record_iternext(self, next=None): # pylint:disable=redefined-builtin
         """
         Implementation of `ZODB.interfaces.IStorageCurrentRecordIteration`.
 
@@ -959,15 +961,18 @@ def _zlibstorage_new_instance(self):
     # It's not a smart idea copying the dict directly, it contains mutable things like
     # __provides__ that we don't want to share.
     new_base = self.base.new_instance()
+    # pylint:disable-next=protected-access
     new_self = type(self)(new_base, compress=self._transform is zlibstorage.compress)
 
     return new_self
 
 def _zlibstorage_pack(self, pack_time, referencesf, *args, **kwargs):
+    # pylint:disable-next=protected-access
     untransform = self._untransform
     def refs(state, oids=None):
         return referencesf(untransform(state), oids)
     return self.base.pack(pack_time, refs, *args, **kwargs)
 
 def _zlibstorage_Iterator_len(self):
+    # pylint:disable-next=protected-access
     return len(self._base_it)

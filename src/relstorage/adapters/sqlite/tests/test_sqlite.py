@@ -85,7 +85,7 @@ class Sqlite3AdapterMixin(object):
             for k, v in options.items()
         )
 
-        return u"""
+        return """
         <sqlite3>
             %s
             gevent_yield_interval 42
@@ -130,6 +130,7 @@ class TestSqlite3(Sqlite3AdapterMixin, reltestbase.RelStorageTestBase):
         from ZODB import DB
 
         def size_wal():
+            # pylint:disable-next=protected-access
             d = self._storage._adapter.data_dir
             wal = os.path.join(d, 'main.sqlite3-wal')
 
@@ -190,7 +191,7 @@ class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
 
     def __init__(self):
         from relstorage.adapters.sqlite import drivers
-        super(Sqlite3TestSuiteBuilder, self).__init__(
+        super().__init__(
             drivers,
             Sqlite3AdapterMixin,
             extra_test_classes=(TestSqlite3,)

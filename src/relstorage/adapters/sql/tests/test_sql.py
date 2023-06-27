@@ -39,6 +39,8 @@ from .. import func
 
 from ..expressions import bindparam
 
+# pylint:disable=protected-access
+
 current_object = Table(
     'current_object',
     Column('zoid', OID),

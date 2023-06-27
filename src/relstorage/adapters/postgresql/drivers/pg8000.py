@@ -73,8 +73,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     supports_multiple_statement_execute = False
     supports_64bit_unsigned_id = False
 
-    def __init__(self):
-        super(PG8000Driver, self).__init__()
+    def __init__(self): # pylint:disable=too-complex
+        super().__init__()
         # XXX: global side-effect!
         self.driver_module.paramstyle = 'pyformat'
 
@@ -90,7 +90,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         if getattr(self.driver_module, 'RSConnection', self) is self:
             class Cursor(self.driver_module.Cursor):
                 def __init__(self, conn):
-                    super(Cursor, self).__init__(conn)
+                    super().__init__(conn)
                     # pylint:disable=access-member-before-definition
                     if hasattr(self, '_cached_rows'):
                         # This went away in 1.17
@@ -109,7 +109,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                     return self.execute(sql, stream=stream)
 
                 def execute(self, *args, **kwargs):
-                    result = super(Cursor, self).execute(*args, **kwargs)
+                    result = super().execute(*args, **kwargs)
                     if hasattr(self, '_row_iter'):
                         # pylint:disable=attribute-defined-outside-init
                         self._row_iter = iter([
@@ -144,7 +144,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                     # We must retain support for older versions for Python 2.
                     #
                     # We could probably do better than this
-                    kwargs = dict(
+                    kwargs = dict( # pylint:disable=use-dict-literal
                         user=user, host=host, unix_sock=unix_sock,
                         port=port, database=database,
                         password=password, ssl_context=ssl_context,
@@ -157,11 +157,11 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                         del kwargs['ssl_context']
                         kwargs['ssl'] = ssl_context
                     try:
-                        super(Connection, self).__init__(**kwargs)
+                        super().__init__(**kwargs)
                     except TypeError:
                         # 1.16.0 dropped the ``max_prepared_statements`` argument.
                         del kwargs['max_prepared_statements']
-                        super(Connection, self).__init__(**kwargs)
+                        super().__init__(**kwargs)
                     if (
                             hasattr(self, 'py_types')
                             and list not in self.py_types
@@ -244,6 +244,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         if conn.readonly:
             return False
         # pg8000 1.29 changed in_transaction to _in_transaction
+        # pylint:disable=protected-access
         return conn._in_transaction
 
     def _get_exception_pgcode(self, exc):

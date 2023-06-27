@@ -24,13 +24,15 @@ from relstorage.tests import MockAdapter
 from relstorage.options import Options
 from relstorage.cache import interfaces
 from relstorage.cache import mvcc
-from relstorage.cache import _objectindex as objectindex
+from relstorage.cache import _objectindex as objectindex # pylint:disable=no-name-in-module
 
 from . import LocalClient
 
 # We get this for _TransactionRangeObjectIndex.raw_data;
 # that's an _inthashmap.OidTidMap, which *is* subscriptable
 # pylint:disable=unsubscriptable-object
+# pylint:disable=protected-access
+
 
 class MockObjectIndex(object):
 
@@ -188,7 +190,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
 
 
         # switch to a replica
-        self.polled_tid = self.polled_tid - 1
+        self.polled_tid -= 1
         assert self.polled_tid == 1
         self.do_poll()
         self.assertNoPollingState()
@@ -425,8 +427,8 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertEqual(self.coord.minimum_highest_visible_tid, 5)
         self.assertEqual(self.coord.object_index.depth, 3)
 
-    def test_restore_timeout(self):
-        from relstorage.tests import mock
+    def test_restore_timeout(self): # pylint:disable=too-many-locals
+        from unittest import mock
         from relstorage.tests import MockOptions
         from relstorage.adapters.mover import AbstractObjectMover
         from relstorage.adapters.batch import RowBatcher

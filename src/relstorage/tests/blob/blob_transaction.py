@@ -19,6 +19,8 @@ from relstorage.blobhelper.interfaces import IAuthoritativeBlobHelper
 from relstorage.blobhelper.interfaces import ICachedBlobHelper
 from . import TestBlobMixin
 
+# pylint:disable=protected-access
+
 class TestBlobTransactionMixin(TestBlobMixin):
 
     DATA1 = b'this is blob 1'
@@ -184,16 +186,15 @@ class TestBlobTransactionMixin(TestBlobMixin):
             # files on disk: two revisions of blob1, and one revision
             # of blob2
             self.assertEqual(3, self._count_blobs_in_directory())
+        # If we are a shared blob directory, we didn't remove anything;
+        # that waits until pack time.
+        elif IAuthoritativeBlobHelper.providedBy(self.blob_storage.blobhelper):
+            self.assertEqual(3, self._count_blobs_in_directory())
         else:
-            # If we are a shared blob directory, we didn't remove anything;
-            # that waits until pack time.
-            if IAuthoritativeBlobHelper.providedBy(self.blob_storage.blobhelper):
-                self.assertEqual(3, self._count_blobs_in_directory())
-            else:
-                # We will just have two blobs on disk. The earlier revision
-                # was automatically removed.
-                self.assertTrue(ICachedBlobHelper.providedBy(self.blob_storage.blobhelper))
-                self.assertEqual(2, self._count_blobs_in_directory())
+            # We will just have two blobs on disk. The earlier revision
+            # was automatically removed.
+            self.assertTrue(ICachedBlobHelper.providedBy(self.blob_storage.blobhelper))
+            self.assertEqual(2, self._count_blobs_in_directory())
 
     def test_persistent_blob_handle(self):
         # We shouldn't be able to persist a blob filehandle at commit time
@@ -401,7 +402,8 @@ class TestBlobTransactionMixin(TestBlobMixin):
         # Raises IOError on Python2, and PersmissionError on Python 3,
         # but PermissionError extends OSError (which is the new name for IOError)
         with self.assertRaises(IOError):
-            open(blob.committed(), 'w')
+            with open(blob.committed(), 'w', encoding='utf-8'):
+                pass
         conn.close()
 
     def test_tpc_abort(self):

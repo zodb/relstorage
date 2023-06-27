@@ -8,8 +8,10 @@ from __future__ import division
 from __future__ import print_function
 
 
-from relstorage import _inthashmap
+from relstorage import _inthashmap # pylint:disable=no-name-in-module
 from relstorage.tests import TestCase
+
+# pylint:disable=unnecessary-dunder-call,protected-access
 
 class TestOidSet(TestCase):
 
@@ -208,7 +210,7 @@ class TestDict(TestCase):
 
     def test_update_from_generator(self):
         s = self._makeOne()
-        s.update(i for i in [(42, 24)])
+        s.update(i for i in ((42, 24),))
         self._check_42_to_24(s)
 
     def test_update_from_same_kind(self):
@@ -273,7 +275,7 @@ class TestOidTidMap(TestDict):
 
     def test_empty(self):
         # pylint:disable=no-member
-        s = super(TestOidTidMap, self).test_empty()
+        s = super().test_empty()
 
         with self.assertRaises(ValueError):
             s.minValue()
@@ -282,7 +284,7 @@ class TestOidTidMap(TestDict):
 
     def test__setitem__(self):
         # pylint:disable=no-member
-        s = super(TestOidTidMap, self).test__setitem__()
+        s = super().test__setitem__()
         self.assertEqual(24, s.minValue())
         self.assertEqual(24, s.maxValue())
 

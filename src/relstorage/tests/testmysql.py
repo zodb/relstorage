@@ -32,6 +32,7 @@ from .util import skipOnCI
 from .util import AbstractTestSuiteBuilder
 from .util import DEFAULT_DATABASE_SERVER_HOST
 
+# pylint:disable=protected-access
 
 class MySQLAdapterMixin(object):
 
@@ -77,7 +78,7 @@ class MySQLAdapterMixin(object):
             for k, v in options.items()
         )
 
-        return u"""
+        return """
         <mysql>
             %s
         </mysql>
@@ -94,7 +95,7 @@ class TestGenerateTID(MySQLAdapterMixin,
     # pylint:disable=too-many-ancestors
 
     def setUp(self):
-        super(TestGenerateTID, self).setUp()
+        super().setUp()
         self._storage = self._closing(self.make_storage())
 
     def test_extract_parts(self):
@@ -191,7 +192,7 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     def __init__(self):
         from relstorage.adapters.mysql import drivers
-        super(MySQLTestSuiteBuilder, self).__init__(
+        super().__init__(
             drivers,
             MySQLAdapterMixin,
             extra_test_classes=(TestGenerateTID,)
@@ -224,7 +225,7 @@ class GenericMySQLTestsMixin(object):
         # `max_allowed_packet`, you probably need to increase it.
         # JAM uses 64M.
         # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
-        super(GenericMySQLTestsMixin, self).check16MObject()
+        super().check16MObject()
 
     def checkMyISAMTablesProduceErrorWhenNoCreate(self):
         from ZODB.POSException import StorageError

@@ -53,6 +53,7 @@ class AdapterTestBase(TestCase):
                         if hasattr(orig, '__get__'):
                             # Must be Python 3, we got the raw unbound function, we need to bind it
                             # and add the self parameter.
+                            # pylint:disable=unnecessary-dunder-call
                             orig = orig.__get__(type(attr_val), attr_val)
                         try:
                             setattr(attr_val, k, orig)

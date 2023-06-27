@@ -74,7 +74,7 @@ class PostgreSQLAdapter(AbstractAdapter):
         self.locker = locker
         self.mover = mover
         self.connmanager = connmanager
-        super(PostgreSQLAdapter, self).__init__(options)
+        super().__init__(options)
 
     def _create(self):
         driver = self.driver
@@ -216,7 +216,7 @@ class PostgreSQLAdapter(AbstractAdapter):
                                commit=True,
                                committing_tid_int=None,
                                after_selecting_tid=lambda tid: None):
-
+        # pylint:disable=too-many-locals
         # In all versions of Postgres (up through 11 anyway),
         # stored functions cannot COMMIT. In Postgres 11,
         # the newly-introduced stored procedures *can* COMMIT,

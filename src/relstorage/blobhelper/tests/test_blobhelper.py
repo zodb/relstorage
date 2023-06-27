@@ -31,15 +31,16 @@ from ..interfaces import IBlobHelper
 test_oid = b'\0' * 7 + b'\x01'
 test_tid = b'\0' * 7 + b'\x02'
 
+# pylint:disable=protected-access
 
 def write_file(fn, data):
     assert isinstance(data, str)
-    with open(fn, 'w') as f:
+    with open(fn, 'w', encoding='utf-8') as f:
         f.write(data)
 
 
 def read_file(fn):
-    with open(fn, 'r') as f:
+    with open(fn, 'r', encoding='utf-8') as f:
         return f.read()
 
 

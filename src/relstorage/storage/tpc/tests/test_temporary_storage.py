@@ -16,14 +16,14 @@ class TestTemporaryStorage(unittest.TestCase):
         return TemporaryStorage()
 
     def setUp(self):
-        super(TestTemporaryStorage, self).setUp()
+        super().setUp()
         from .. import temporary_storage
-        temporary_storage.id = lambda _: 0xDEADBEEF
+        setattr(temporary_storage, 'id', lambda _: 0xDEADBEEF)
 
     def tearDown(self):
         from .. import temporary_storage
-        del temporary_storage.id
-        super(TestTemporaryStorage, self).tearDown()
+        delattr(temporary_storage, 'id')
+        super().tearDown()
 
     _EMPTY_STR = '<TPCTemporaryStorage at 0xdeadbeef count=0 bytes=0>'
 

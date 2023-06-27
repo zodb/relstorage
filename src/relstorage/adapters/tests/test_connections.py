@@ -21,6 +21,8 @@ from ..connections import LoadConnection
 from ..connections import ClosedConnection
 from ..connections import StoreConnectionPool
 
+# pylint:disable=protected-access
+
 class TestConnectionCommon(TestCase):
 
     klass = StoreConnection
@@ -217,19 +219,19 @@ class TestStoreConnectionPool(TestCase):
         class ConnManager(AbstractConnectionManager):
             # pylint:disable=signature-differs
             def __init__(self, options=None, driver=None):
-                super(ConnManager, self).__init__(options or MockOptions(),
-                                                  driver or MockDriver())
+                super().__init__(options or MockOptions(),
+                                 driver or MockDriver())
 
                 self.begin_count = 0
                 self.restart_count = 0
 
             def restart_store(self, *_args, **_kwargs):
                 self.restart_count += 1
-                super(ConnManager, self).restart_store(*_args, **_kwargs)
+                super().restart_store(*_args, **_kwargs)
 
             def begin(self, conn, cursor):
                 self.begin_count += 1
-                super(ConnManager, self).begin(conn, cursor)
+                super().begin(conn, cursor)
 
             def open(self, *_args, **_kwargs):
                 conn = MockConnection()

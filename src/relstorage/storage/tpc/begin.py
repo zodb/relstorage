@@ -81,7 +81,7 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
     _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
     def __init__(self, shared_state):
-        super(AbstractBegin, self).__init__(shared_state)
+        super().__init__(shared_state)
         self.invalidated_oids = ()
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
@@ -268,7 +268,7 @@ class HistoryPreserving(AbstractBegin):
         # (and add extra bloat to the DB; that kind of defeats the point of
         # deleting objects).
         self.tpc_vote_factory = HPDeleteOnlyVoteFactory
-        return super(HistoryPreserving, self).deleteObject(oid, oldserial, transaction)
+        return super().deleteObject(oid, oldserial, transaction)
 
     def undo(self, transaction_id, transaction):
         """

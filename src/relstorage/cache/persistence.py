@@ -69,7 +69,7 @@ def trace_file(options, prefix):
         pass
     fname = os.path.join(parent_dir, name)
     try:
-        tf = open(fname, 'ab')
+        tf = open(fname, 'ab') # pylint:disable=consider-using-with
     except IOError as e: # pragma: no cover
         log.warning("Cannot write tracefile %r (%s)", fname, e)
         tf = None
@@ -117,7 +117,7 @@ class Sqlite3TooOldError(ValueError):
     """Raised if the sqlite3 module is too old."""
 
     def __init__(self, *_args):
-        super(Sqlite3TooOldError, self).__init__(
+        super().__init__(
             "Unable to use sqlite; minimum version is %s but this version is %s" % (
                 "3.8.3", sqlite3.sqlite_version_info
             ))
@@ -175,12 +175,11 @@ def sqlite_connect(options, prefix,
 def __quiet_remove(path):
     try:
         os.unlink(path)
+        return True
     except os.error as e:
-        # TODO: Use FileNotFoundError on Python 3
+        # TODO: Use FileNotFoundError on Python 3?
         log_meth = log.exception
         if e.errno == errno.ENOENT:
             log_meth = log.debug
         log_meth("Failed to remove %r", path)
         return False
-    else:
-        return True

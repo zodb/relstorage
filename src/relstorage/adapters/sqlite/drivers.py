@@ -93,7 +93,7 @@ class UnableToConnect(sqlite3.OperationalError):
         return self
 
     def __str__(self):
-        s = super(UnableToConnect, self).__str__()
+        s = super().__str__()
         if self.filename:
             s += " (At: %r)" % self.filename
         return s
@@ -191,13 +191,13 @@ class Connection(sqlite3.Connection):
         self.before_commit_functions = []
 
         try:
-            super(Connection, self).__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)
         except sqlite3.OperationalError as e:
             raise UnableToConnect(e).with_filename(rs_db_filename)
 
     def __repr__(self):
         if not self.rs_db_filename:
-            return super(Connection, self).__repr__()
+            return super().__repr__()
         try:
             in_tx = self.in_transaction
         except sqlite3.ProgrammingError:
@@ -264,7 +264,7 @@ class Connection(sqlite3.Connection):
             "Changing   connection settings: %(changing)s.\n\t"
             "Desired    connection settings: %(desired)s.\n\t"
             "Unapplied  connection settings: %(applied)s.\n\t",
-            dict(
+            dict( # pylint:disable=use-dict-literal
                 conn=self,
                 ver=sqlite3.sqlite_version,
                 defs={
@@ -361,7 +361,7 @@ class Connection(sqlite3.Connection):
             # It's possible the file was removed.
             logger.exception("Failed to optimize database; was it removed?")
 
-        super(Connection, self).close()
+        super().close()
 
 
 @implementer(IDBDriver)
@@ -385,7 +385,7 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
     supports_64bit_unsigned_id = False
 
     def __init__(self):
-        super(Sqlite3Driver, self).__init__()
+        super().__init__()
         # Sadly, if a connection is closed out from under it,
         # sqlite3 throws ProgrammingError, which is not very helpful.
         # That should really only happen in tests, though, since
@@ -712,7 +712,7 @@ class Sqlite3GeventDriver(GeventDriverMixin,
             self.gevent,
             self.yield_to_gevent_instruction_interval,
         )
-        return super(Sqlite3GeventDriver, self)._connect_to_file_or_uri(*args, **kwargs)
+        return super()._connect_to_file_or_uri(*args, **kwargs)
 
     def enter_critical_phase_until_transaction_end(self, connection, cursor): # pylint:disable=unused-argument
         connection.enter_critical_phase_until_transaction_end()

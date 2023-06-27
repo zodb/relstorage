@@ -21,6 +21,8 @@ from relstorage.adapters.oracle import OracleAdapter
 
 from .util import AbstractTestSuiteBuilder
 
+# pylint:disable=protected-access
+
 class OracleAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
@@ -49,7 +51,7 @@ class OracleAdapterMixin(object):
             dbname = self.base_dbname
         else:
             dbname = self.base_dbname + '_hf'
-        return u"""
+        return """
         <oracle>
             driver %s
             user %s
@@ -90,7 +92,7 @@ class OracleTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     def __init__(self):
         from relstorage.adapters.oracle import drivers
-        super(OracleTestSuiteBuilder, self).__init__(
+        super().__init__(
             drivers,
             OracleAdapterMixin,
         )

@@ -153,7 +153,7 @@ class MySQLLocker(AbstractLocker):
     _lock_share_clause_nowait = 'LOCK IN SHARE MODE'
 
     def __init__(self, options, driver, batcher_factory, version_detector):
-        super(MySQLLocker, self).__init__(options, driver, batcher_factory)
+        super().__init__(options, driver, batcher_factory)
         assert self.supports_row_lock_nowait # Set by default in the class.
         self.supports_row_lock_nowait = None
         self.version_detector = version_detector
@@ -165,7 +165,7 @@ class MySQLLocker(AbstractLocker):
         self.set_timeout_stmt = _SET_TIMEOUT_STMT
 
     def on_store_opened(self, cursor, restart=False):
-        super(MySQLLocker, self).on_store_opened(cursor, restart=restart)
+        super().on_store_opened(cursor, restart=restart)
         if restart:
             return
 

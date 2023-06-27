@@ -63,6 +63,7 @@ LOCK_EARLY = get_boolean_from_environ(
     logger=logger,
 )
 
+# pylint:disable=protected-access
 
 class _LazyResource(BaseLazy):
 
@@ -274,6 +275,8 @@ class SharedTPCState(object):
 
         if exceptions: # pragma: no cover
             # This usually indicates a bug in RelStorage that should be fixed.
+            # pylint:disable=broad-exception-raised
+            # TODO: Raise something better
             raise Exception("Failed to close one or more resources: %s" % (exceptions,))
 
     def abort(self, force=False):

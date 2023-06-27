@@ -47,14 +47,14 @@ class Psycopg2cffiDriver(Psycopg2Driver):
 
         if getattr(mod, 'RSPsycopg2cffiConnection', self) is self:
             class Cursor(mod.extensions.cursor):
-
                 def copy_expert(self, *args, **kwargs):
+                    # pylint:disable=protected-access
                     self.connection._begin_transaction()
-                    return super(Cursor, self).copy_expert(*args, **kwargs)
+                    return super().copy_expert(*args, **kwargs)
 
             class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod, 'readonly')):
                 def __init__(self, dsn, **kwargs):
-                    super(Connection, self).__init__(dsn, **kwargs)
+                    super().__init__(dsn, **kwargs)
                     self.cursor_factory = Cursor
                     self.readonly = None
 

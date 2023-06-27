@@ -70,7 +70,7 @@ class Restore(object):
         # we could still wind up with locking issues (I think?)
         adapter = begin_state.shared_state.adapter
         cursor = begin_state.shared_state.store_connection.cursor
-        packed = (status == 'p')
+        packed = (status == 'p') # pylint:disable=superfluous-parens
         try:
             committing_tid_lock = DatabaseLockedForTid.lock_database_for_given_tid(
                 committing_tid, packed,
@@ -176,13 +176,13 @@ class _VoteFactoryMixin(object):
 
     def __init__(self, begin_state, committing_tid_lock, batcher):
         # type: (Restore, Optional[DatabaseLockedForTid], Any) -> None
-        super(_VoteFactoryMixin, self).__init__(begin_state)
+        super().__init__(begin_state)
         # pylint:disable=assigning-non-slot
         self.committing_tid_lock = committing_tid_lock
         self.batcher = batcher
 
     def _flush_temps_to_db(self, cursor):
-        super(_VoteFactoryMixin, self)._flush_temps_to_db(cursor)
+        super()._flush_temps_to_db(cursor)
         self.batcher.flush()
 
 

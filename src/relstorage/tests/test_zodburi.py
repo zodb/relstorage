@@ -5,7 +5,7 @@ import unittest
 
 from relstorage.zodburi_resolver import RelStorageURIResolver
 
-from . import mock
+from unittest import mock
 
 class AbstractURIResolverTestBase(unittest.TestCase):
 
@@ -151,8 +151,12 @@ class TestMySQLURIResolver(AbstractURIResolverTestBase):
                    host='somehost', port='5432', **kwargs):
         args = dict(locals())
         args.update(kwargs)
-        args['db'] = args['dbname']; del args['dbname']
-        args['passwd'] = args['password']; del args['password']
+        args['db'] = args['dbname']
+        del args['dbname']
+
+        args['passwd'] = args['password']
+        del args['password']
+
         args['port'] = int(args['port'])
 
         del args['kwargs']

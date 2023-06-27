@@ -171,6 +171,7 @@ class PersistentCacheStorageTests(TestCase):
 
 
     def __do_sets(self, root, new_data, old_tids, old_data):
+        # pylint:disable=too-many-locals
         for key, value in new_data.items():
             old_tid = old_tids.get(key)
             old_value = old_data.get(key)
@@ -483,6 +484,7 @@ class PersistentCacheStorageTests(TestCase):
 
 
     def checkNoConflictWhenOverlappedModificationNotInCache(self):
+        # pylint:disable=too-many-locals
         # A storage writes a current state of an object O1 at TID1
         # to persistent cache.
         # Meanwhile, an unconnected storage writes O1
@@ -566,6 +568,7 @@ class PersistentCacheStorageTests(TestCase):
         _check_nested(storage_with_old_state)
 
     def checkNoConflictWhenOverlappedModificationNotInCache2(self):
+        # pylint:disable=too-many-locals
         # pylint:disable=too-many-statements
         # Like checkNoConflictWhenOverlappedModificationNotInCache,
         # but the storage that does the invalidation polls

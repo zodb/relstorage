@@ -17,7 +17,7 @@ class GeventPsycopg2Driver(psycopg2.GeventPsycopg2Driver):
     def _create_connection(self, mod, *extra_slots):
         cls = type(self)
         if cls.GeventConnection is None:
-            base = super(GeventPsycopg2Driver, self)._create_connection(mod, *extra_slots)
+            base = super()._create_connection(mod, *extra_slots)
 
             class GeventConnection(base):
                 def __init__(self, *args, **kwargs): # pylint:disable=super-init-not-called
@@ -37,6 +37,7 @@ class TestGeventPsycopg2(IDBDriverSupportsCriticalTestMixin,
             return GeventPsycopg2Driver()
         except ImportError as e:
             self.skipTest(e)
+            raise # unreachable
 
     def test_sync_ends_critical_phase(self):
         driver = self._makeOne()

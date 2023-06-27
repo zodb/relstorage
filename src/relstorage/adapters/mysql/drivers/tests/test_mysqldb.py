@@ -39,7 +39,7 @@ class GeventMySQLdbDriver(mysqldb.GeventMySQLdbDriver):
 class TestGeventMySQLdb(IDBDriverSupportsCriticalTestMixin,
                         TestCase):
 
-    def _makeOne(self):
+    def _makeOne(self): # pylint:disable=inconsistent-return-statements
         try:
             return GeventMySQLdbDriver()
         except ImportError as e:

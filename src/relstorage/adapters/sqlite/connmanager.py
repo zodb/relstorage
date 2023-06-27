@@ -105,7 +105,7 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
         self.pragmas = nice_to_have_pragmas
         # XXX: Why do we override the default for this?
         self.pragmas['journal_size_limit'] = None
-        super(Sqlite3ConnectionManager, self).__init__(options, driver)
+        super().__init__(options, driver)
 
         assert self.isolation_load == type(self).isolation_serializable
         assert self.isolation_store == type(self).isolation_read_committed
@@ -146,7 +146,7 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
 
     def restart_load(self, conn, cursor, needs_rollback=True):
         needs_rollback = True
-        super(Sqlite3ConnectionManager, self).restart_load(conn, cursor, needs_rollback)
+        super().restart_load(conn, cursor, needs_rollback)
         assert not conn.in_transaction
         # See _do_open_for_load.
         cursor.execute('BEGIN DEFERRED TRANSACTION')

@@ -101,13 +101,14 @@ class PostgreSQLLocker(AbstractLocker):
         # If we used the blocking version, it returned void (NULL/None),
         # or raised an error. No need to examine the rows.
         if shared_locks_block:
-            return super(PostgreSQLLocker, self)._lock_consume_rows_for_readCurrent(
+            return super()._lock_consume_rows_for_readCurrent(
                 rows,
                 shared_locks_block)
 
         for got_lock, in rows:
             if not got_lock:
                 raise UnableToLockRowsToReadCurrentError
+        return None
 
     def release_commit_lock(self, cursor):
         # no action needed, locks released with transaction.

@@ -167,7 +167,8 @@ def _make_data(data_or_size, key_group_size):
 
 
 def local_benchmark(runner):
-    # pylint:disable=too-many-statements,too-many-locals
+    # pylint:disable=too-many-statements,too-many-locals,too-complex
+    # pylint:disable=protected-access
     import gc
     from relstorage.cache.local_client import LocalClient
 
@@ -479,7 +480,8 @@ class StorageTraceSimulator(object):
             import bz2
             f = bz2.BZ2File(filename, mode)
         else:
-            f = open(filename, mode)
+            # pylint:disable=consider-using-with
+            f = open(filename, mode) # pylint:disable=unspecified-encoding
         return f
 
     def _read_binary_records(self, filename, num_clients=8, write_pct=.30,
@@ -576,7 +578,7 @@ class StorageTraceSimulator(object):
         return stats
 
     def _simulate_storage(self, records, cache_local_mb, f):
-        # pylint:disable=too-many-locals,too-many-statements
+        # pylint:disable=too-many-locals,too-many-statements,too-complex
         from relstorage.cache.storage_cache import StorageCache
         from relstorage.cache.tests import MockAdapter
         from ZODB.utils import p64
@@ -700,7 +702,8 @@ class StorageTraceSimulator(object):
         self._report_one(stats, f, cache_local_mb, now, done)
 
         if hasattr(root_cache.local_client, 'operations'):
-            with open(f + '.' + str(options.cache_local_mb) + '.ctrace', 'w') as fp:
+            fname = f + '.' + str(options.cache_local_mb) + '.ctrace'
+            with open(fname, 'w', encoding='utf-8') as fp:
                 for o in root_cache.local_client.operations:
                     fp.write("%s,%s,%d\n" % o)
         return stats
@@ -796,13 +799,14 @@ def save_load_benchmark(runner):
             # if bucket[(j, j)] is datum:
             #     raise AssertionError()
         mem_before = get_memory_usage()
+        # pylint:disable-next=protected-access
         client._bulk_update(keys_and_values, mem_usage_before=mem_before)
         del keys_and_values
         #print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
         return client
 
     def _open(fd, mode):
-        return io.open(fd, mode, buffering=16384)
+        return io.open(fd, mode, buffering=16384) # pylint:disable=unspecified-encoding
 
     def write_client():
         client = create_and_populate_client()

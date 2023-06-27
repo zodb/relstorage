@@ -86,7 +86,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         MVCCInternalConsistencyError = AssertionError
 
     def __init__(self, adapter, options, prefix, _parent=None):
-        super(StorageCache, self).__init__()
+        super().__init__()
         self.adapter = adapter
         self.options = options
         self.keep_history = options.keep_history
@@ -250,6 +250,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
                 # more accurate cache. Should that maybe be AND?
                 return self.polling_state.save(self, save_args)
             logger.debug("Cannot justify writing cache file, no hits or misses")
+        return None
 
     def restore(self):
         # We must only restore into an empty cache.
@@ -408,6 +409,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         cache_data = cache.get((oid_int, tid_int), False)
         if cache_data and cache_data[1] == tid_int:
             return cache_data[0]
+        return None
 
     def load(self, cursor, oid_int):
         """
@@ -584,8 +586,9 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             )
             self._reset("Unknown internal violation")
 
-        if changes is not None:
-            return OIDSet(oid for oid, tid in changes if tid != ignore_tid)
+        if changes is None:
+            return None
+        return OIDSet(oid for oid, tid in changes if tid != ignore_tid)
 
 
 class _BeforeStorageCache(StorageCache):

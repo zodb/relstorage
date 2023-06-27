@@ -50,7 +50,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         self._params = params.copy()
         self._db_connect = driver.connect
         self._db_driver = driver
-        super(MySQLdbConnectionManager, self).__init__(options, driver)
+        super().__init__(options, driver)
 
         self.isolation_load = self.isolation_repeatable_read_ro
         self.isolation_store = self.isolation_read_committed

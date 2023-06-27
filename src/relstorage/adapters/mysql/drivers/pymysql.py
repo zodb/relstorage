@@ -52,7 +52,7 @@ class PyMySQLDriver(AbstractMySQLDriver):
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
     def __init__(self):
-        super(PyMySQLDriver, self).__init__()
+        super().__init__()
 
         pymysql_err = self.driver_module
 

@@ -63,7 +63,7 @@ class TestBlobCacheMixin(TestBlobMixin):
         assert cached.native_thread_spawn is not thread_spawn
         cached.native_thread_spawn = thread_spawn
 
-        super(TestBlobCacheMixin, self).setUp()
+        super().setUp()
         # We're going to wait for any threads we started to finish, so...
         self._old_threads = list(threading.enumerate())
 
@@ -90,7 +90,7 @@ class TestBlobCacheMixin(TestBlobMixin):
 
         self._wait_for_all_spawned_threads_to_finish()
         self._old_threads = []
-        super(TestBlobCacheMixin, self).tearDown()
+        super().tearDown()
 
     # Set this and BLOB_SIZE to create a total of 10,000
     # bytes of data

@@ -29,14 +29,14 @@ from ..locker import AbstractLocker
 class OracleLocker(AbstractLocker):
 
     def __init__(self, options, driver, inputsize_NUMBER, batcher_factory):
-        super(OracleLocker, self).__init__(
+        super().__init__(
             options=options,
             driver=driver,
             batcher_factory=batcher_factory
         )
         self.inputsize_NUMBER = inputsize_NUMBER
         timeout = ' WAIT ' + str(self.commit_lock_timeout)
-        self._lock_current_clause = self._lock_current_clause + timeout
+        self._lock_current_clause += timeout
         # 'FOR SHARE' isn't supported so all locks are exclusive.
         self._lock_share_clause = self._lock_current_clause
         self._lock_share_clause_nowait = 'FOR UPDATE NOWAIT'
@@ -55,8 +55,10 @@ class OracleLocker(AbstractLocker):
         """
         try:
             cursor.execute(stmt)
-        except self.lock_exceptions:  # cx_Oracle.DatabaseError:
-            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
+        except self.lock_exceptions as exc:  # cx_Oracle.DatabaseError:
+            raise UnableToAcquirePackUndoLockError(
+                'A pack or undo operation is in progress'
+            ) from exc
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""

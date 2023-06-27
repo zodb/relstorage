@@ -9,6 +9,8 @@ from __future__ import print_function
 
 from ._util import Resolvable
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
 
 class LiteralNode(Resolvable):
 
@@ -35,7 +37,7 @@ class NullNode(LiteralNode):
     __slots__ = ()
 
     def __init__(self):
-        super(NullNode, self).__init__(None)
+        super().__init__(None)
 
     def __compile_visit__(self, compiler):
         compiler.emit_null()

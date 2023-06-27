@@ -24,6 +24,8 @@ from ..mover import Sqlite3ObjectMover
 from ..drivers import Sqlite3Driver
 from ...drivers import DriverNotAvailableError
 
+# pylint:disable=protected-access
+
 class TestMoverQueries(TestCase):
     maxDiff = None
 

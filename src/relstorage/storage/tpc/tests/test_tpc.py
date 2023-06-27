@@ -18,6 +18,7 @@ from nti.testing.matchers import validly_provides
 
 from ...interfaces import ITPCStateNotInTransaction
 
+# pylint:disable=protected-access
 
 class TestNotInTransactionCommon(unittest.TestCase):
     def _makeOne(self, read_only=False, begin_factory=None):

@@ -30,6 +30,8 @@ from ..interfaces import IStorageCache
 from . import MockOptionsWithFakeMemcache as MockOptionsWithFakeCache
 from . import MockAdapter
 
+# pylint:disable=protected-access
+
 class StorageCacheTests(TestCase):
     # pylint:disable=too-many-public-methods
 

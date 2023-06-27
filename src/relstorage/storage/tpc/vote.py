@@ -136,7 +136,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # If committing_tid is passed to this method, it means the
         # database has already been locked and the TID is locked in.
         # This is (only!) done when we're restoring transactions.
-        super(AbstractVote, self).__init__(begin_state.shared_state)
+        super().__init__(begin_state.shared_state)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
         self.ude = begin_state.ude
@@ -224,6 +224,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # used, or whether we're updating existing objects and avoid a
         # bit more overhead, but benchmarking suggests that it's not
         # worth it in common cases.
+        # pylint:disable-next=protected-access
         storage._oids.set_min_oid(
             store_connection,
             self.shared_state.temp_storage.max_stored_oid)
@@ -560,7 +561,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
                 assert not self.shared_state.blobhelper.NEEDS_DB_LOCK_TO_FINISH
                 try:
                     self.shared_state.blobhelper.finish(self.committing_tid_lock.tid)
-                except (IOError, OSError):
+                except OSError:
                     # If something failed to move, that's not really a problem:
                     # if we did any moving now, we're just a cache.
                     logger.exception(
@@ -622,8 +623,8 @@ class HistoryPreserving(AbstractVote):
         # Using undo() requires a new TID, so if we had already begun
         # a transaction by locking the database and allocating a TID,
         # we must preserve that.
-        super(HistoryPreserving, self).__init__(begin_state,
-                                                begin_state.committing_tid_lock)
+        super().__init__(begin_state,
+                         begin_state.committing_tid_lock)
 
 
 class HistoryPreservingDeleteOnly(HistoryPreserving):
@@ -681,4 +682,4 @@ def add_details_to_lock_error(ex, shared_state, required_tids):
         ex.message += '\n' + message
 
     if isinstance(getattr(ex, 'args', None), tuple):
-        ex.args = ex.args + (message,)
+        ex.args += (message,)

@@ -52,7 +52,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
     def __init__(self):
-        super(PyMySQLConnectorDriver, self).__init__()
+        super().__init__()
         # This driver doesn't support ``init_command``, we have to run
         # it manually.
         self.__init_command = self._init_command
@@ -122,7 +122,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
                 def __init__(self, charset_name, use_unicode):
                     if PY2:
                         use_unicode = False
-                    super(BlobConverter, self).__init__(charset_name, use_unicode)
+                    super().__init__(charset_name, use_unicode)
 
                 if PY2:
                     def _STRING_to_python(self, value, dsc=None):
@@ -132,7 +132,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
                             # The Python version tends to return bytearray values.
                             return bytes(value)
                         # The C extension tends to return byte (aka str) values.
-                        return super(BlobConverter, self)._STRING_to_python(value, dsc)
+                        return super()._STRING_to_python(value, dsc) # pylint:disable=no-member
 
                     _VAR_STRING_to_python = _STRING_to_python
 
@@ -174,7 +174,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # prepared cursor, but the prepared cursor doesn't gain us
         # anything anyway.
         kwargs['buffered'] = True
-        conn = super(PyMySQLConnectorDriver, self).connect(*args, **kwargs)
+        conn = super().connect(*args, **kwargs)
         cur = conn.cursor()
         try:
             cur.execute(self.__init_command)
@@ -187,7 +187,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
             cursor = conn.cursor(buffered=False)
             cursor.arraysize = self.cursor_arraysize
         else:
-            cursor = super(PyMySQLConnectorDriver, self).cursor(conn, server_side=server_side)
+            cursor = super().cursor(conn, server_side=server_side)
         cursor.connection = conn
         return cursor
 
@@ -232,7 +232,7 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     _GEVENT_CAPABLE = False
 
     def get_driver_module(self):
-        mod = super(CMySQLConnectorDriver, self).get_driver_module()
+        mod = super().get_driver_module()
         if not mod.HAVE_CEXT:
             raise ImportError("No C extension")
         return mod
@@ -251,12 +251,12 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
 
         if cls._C_CONVERTER_CLASS is None:
             from mysql.connector.conversion import FieldType # pylint:disable=import-error
-            # pylint:disable=inherit-non-class
+            # pylint:disable=inherit-non-class,protected-access
             class Converter(PyMySQLConnectorDriver._get_converter_class()):
                 def to_python(self, vtype, value):
                     if value == 0 and vtype[1] == FieldType.LONGLONG:
                         return value
-                    return super(Converter, self).to_python(vtype, value)
+                    return super().to_python(vtype, value)
 
             cls._C_CONVERTER_CLASS = Converter
 

@@ -49,11 +49,13 @@ from relstorage.tests.blob.blob_cache import TestBlobCacheMixin
 from relstorage.tests.blob.blob_cache import TestBlobCacheExternalCleanupMixin
 from relstorage.tests.blob import TestBlobMixin
 
+# pylint:disable=protected-access
+
 class BlobTestBase(TestCase,
                    ZODB.tests.StorageTestBase.StorageTestBase):
 
     def setUp(self):
-        super(BlobTestBase, self).setUp()
+        super().setUp()
         try:
             self._storage = self.create_storage() # pylint:disable=no-member
         except:
@@ -111,7 +113,8 @@ class BlobUndoTests(BlobTestBase):
         connection = database.open()
         root = connection.root()
         transaction.begin()
-        with open('consume1', 'wb') as f: f.write(b'this is state 1')
+        with open('consume1', 'wb') as f:
+            f.write(b'this is state 1')
         blob = Blob()
         blob.consumeFile('consume1')
         root['blob'] = blob
@@ -119,7 +122,8 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         blob = root['blob']
-        with open('consume2', 'wb') as f: f.write(b'this is state 2')
+        with open('consume2', 'wb') as f:
+            f.write(b'this is state 2')
         blob.consumeFile('consume2')
         transaction.commit()
 
@@ -283,13 +287,13 @@ class LargeBlobTest(BlobTestBase): # pragma: no cover
                 a.rotate(int(b[0]))
                 b.rotate(1)
         datagen = fdata()
-        bytes = 0
+        byte_count = 0
         hasher = md5()
-        while bytes < size:
+        while byte_count < size:
             data = next(datagen)
             hasher.update(data)
             fd.write(data)
-            bytes += len(data)
+            byte_count += len(data)
         return hasher.hexdigest()
 
 
@@ -344,7 +348,8 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         root = connection.root()
         root['blob'] = Blob()
         connection.add(root['blob'])
-        with root['blob'].open('w') as f: _ = f.write(b'test')
+        with root['blob'].open('w') as f:
+            _ = f.write(b'test')
 
         blob_storage.pack(time.time(), referencesf)
 
@@ -461,7 +466,8 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         db = self.database
         conn = db.open()
         conn.root().b = ZODB.blob.Blob()
-        with conn.root().b.open('w') as f: _ = f.write(b'initial')
+        with conn.root().b.open('w') as f:
+            _ = f.write(b'initial')
         _ = transaction.savepoint()
         self.assertEqual(1, len(os.listdir(tdir)))
 
@@ -471,9 +477,11 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
             os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0)
 
         conn.root().b = ZODB.blob.Blob()
-        with conn.root().b.open('w') as f: _ = f.write(b'initial')
+        with conn.root().b.open('w') as f:
+            _ = f.write(b'initial')
         transaction.commit()
-        with conn.root().b.open('w') as f: _ = f.write(b'1')
+        with conn.root().b.open('w') as f:
+            _ = f.write(b'1')
         _ = transaction.savepoint()
         transaction.abort()
         self.assertFalse(os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0)

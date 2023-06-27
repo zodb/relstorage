@@ -208,6 +208,7 @@ class AbstractAdapter(DatabaseHelpersMixin):
                 self._describe_best_lock_objects_and_detect_conflicts(),
                 kind
             )
+            return None # unreachable
 
     def _composed_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_oid_ints = read_current_oids.keys()

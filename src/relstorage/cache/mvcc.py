@@ -39,7 +39,7 @@ from relstorage.options import Options
 
 from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
-from ._objectindex import _ObjectIndex # pylint:disable=no-name-in-module
+from ._objectindex import _ObjectIndex # pylint:disable=no-name-in-module,import-error
 
 
 
@@ -116,7 +116,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
     object_index = None
 
     def __init__(self, options=None):
-        super(MVCCDatabaseCoordinator, self).__init__()
+        super().__init__()
         # There's a tension between blocking as little as possible
         # and making as few polling queries as possible. Polling is when
         # the GIL is released or gevent switches can occur, and potentially
@@ -413,7 +413,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             required_tid,
         )
         oids_tids_to_del = OidTMap()
-        while 1:
+        while 1: # pylint:disable=consider-refactoring-into-while-condition
             if object_index.depth == 1:
                 # Nothing left to vacuum
                 break
@@ -463,7 +463,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # We have never polled or verified anything, don't
             # try to save what we can't validated.
             logger.debug("No index or HVT; nothing to save %s", self.stats())
-            return
+            return None
         # Vacuum, disposing of uninteresting and duplicate data.
         # We should have no viewers, so we eliminated all except the final map.
         self.detach_all()
@@ -545,6 +545,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         current_tids = adapter.connmanager.open_and_call(poll_cached_oids)
         current_tid = current_tids.get
         polled_invalid_oids = OidSet()
+        # pylint:disable-next=protected-access
         cache_is_correct = local_client._cache.contains_oid_with_tid
 
         for oid_int in cached_oids:

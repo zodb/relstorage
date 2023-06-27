@@ -175,7 +175,8 @@ class _Availability(object):
         except self.raised_exceptions:
             # We're called from test_suite(), and zope.testrunner
             # ignores errors at that time, so we need to print it ourself.
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             raise
         except Exception as e:  # pylint:disable=broad-except
             self._available = False
@@ -399,6 +400,7 @@ class AbstractTestSuiteBuilder(object):
         return self.__skipping_if_not_available(klass, driver_available)
 
     def _add_driver_to_suite(self, suite, layer_prefix, driver_available):
+        # pylint:disable=too-many-locals
         for klass in self._make_check_classes():
             klass = self._new_class_for_driver(klass, driver_available)
             suite.addTest(unittest.makeSuite(klass, "check"))
@@ -481,7 +483,7 @@ class AbstractTestSuiteBuilder(object):
                     storage_is_available=driver_available
                 )
 
-                blob_suite.layer.__bases__ = blob_suite.layer.__bases__ + (history_layer,)
+                blob_suite.layer.__bases__ += (history_layer,)
                 blob_suite.layer.__module__ = "%s.%s" % (
                     history_layer.__module__,
                     history_layer.__name__)

@@ -19,6 +19,10 @@ from .expressions import ParamMixin
 from .expressions import And
 from .expressions import EmptyExpression
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
+
 class Clause(DialectAware):
     """
     A portion of a SQL statement.
@@ -50,7 +54,7 @@ class WhereClause(Clause):
 
 class OrderBy(Clause):
 
-    def __init__(self, expression, dir):
+    def __init__(self, expression, dir): # pylint:disable=redefined-builtin
         self.expression = expression
         self.dir = dir
 
@@ -62,8 +66,7 @@ class OrderBy(Clause):
 
 
 def where(expression):
-    if expression:
-        return WhereClause(expression)
+    return WhereClause(expression) if expression else None
 
 class WhereMixin(object):
     _where = EmptyExpression()
@@ -71,12 +74,14 @@ class WhereMixin(object):
     def where(self, expression):
         expression = expression.resolve_against(self.table)
         s = copy(self)
+        # pylint:disable-next=protected-access
         s._where = where(expression)
         return s
 
     def and_(self, expression):
         expression = expression.resolve_against(self.table)
         s = copy(self)
+        # pylint:disable-next=protected-access
         s._where = self._where.and_(expression)
         return s
 
@@ -178,6 +183,7 @@ class CompiledQuery(object):
         """Returns a dictionary."""
         # If we can't store it directly on the cursor, as happens for
         # types implemented in C, we use a weakkey dictionary.
+        # pylint:disable=protected-access
         try:
             session_prep_stmts = connection._rs_prepared_statements
         except AttributeError:

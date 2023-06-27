@@ -43,7 +43,7 @@ class OracleCompiler(Compiler):
             self.emit_identifier(column_node.name)
             self.emit(" = 'Y' THEN 1 ELSE 0 END")
         else:
-            super(OracleCompiler, self).visit_select_expression(column_node)
+            super().visit_select_expression(column_node)
 
     @contextmanager
     def visit_limited_select(self, select, limit):
@@ -61,6 +61,8 @@ class OracleCompiler(Compiler):
 
     def visit_limit(self, limit_literal): # pylint:disable=method-hidden
         if limit_literal is not None:
+            # TODO: Raise something better
+            # pylint:disable=broad-exception-raised
             raise Exception("Forgot to visit in a visit_limited_select")
 
     def _visit_limit_while_limited(self, limit):

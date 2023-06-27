@@ -26,7 +26,7 @@ from .test_blobhelper import read_file
 from .test_blobhelper import test_oid
 from .test_blobhelper import test_tid
 
-
+# pylint:disable=protected-access
 
 class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
     # Tests that only apply to cache dirs
@@ -52,6 +52,7 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
         self.assertNotIsInstance(blobhelper.adapter, DummyAdapter2)
         self.assertIsInstance(blobhelper2.adapter, DummyAdapter2)
         self.assertIs(blobhelper.fshelper, blobhelper2.fshelper)
+        # pylint:disable-next=no-member
         self.assertIs(blobhelper.cache_checker, blobhelper2.cache_checker)
 
 

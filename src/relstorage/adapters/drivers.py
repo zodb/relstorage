@@ -152,7 +152,7 @@ class AbstractModuleDriver(object):
                 "or the driver was set to 'auto', there may be more drivers to attempt.",
                 self.__name__, self.MODULE_NAME,
                 exc_info=True)
-            raise DriverNotImportableError(self.__name__, reason=str(ex))
+            raise DriverNotImportableError(self.__name__, reason=str(ex)) from ex
 
 
         self.disconnected_exceptions = (mod.OperationalError,
@@ -196,12 +196,12 @@ class AbstractModuleDriver(object):
             from gevent import monkey
         except ImportError: # pragma: no cover
             return False
-        else:
-            # some versions of gevent have a bug where if we're monkey-patched
-            # on the command line using python -m gevent.monkey /path/to/testrunner ...
-            # it doesn't report being monkey-patched.
-            import socket
-            return monkey.is_module_patched('socket') or 'gevent' in repr(socket.socket)
+
+        # some versions of gevent have a bug where if we're monkey-patched
+        # on the command line using python -m gevent.monkey /path/to/testrunner ...
+        # it doesn't report being monkey-patched.
+        import socket
+        return monkey.is_module_patched('socket') or 'gevent' in repr(socket.socket)
 
     # Common compatibility shims, overriden as needed.
 
@@ -404,7 +404,7 @@ class _NoGeventConnectionMixin(object):
     gevent_write_watcher = None
     gevent_sleep = None
 
-try:
+try: # pylint:disable=too-complex
     import gevent
 except ImportError:
     GeventDriverMixin = _NoGeventDriverMixin
@@ -488,7 +488,7 @@ else:
 
         def close(self):
             self.__close_watchers()
-            super(GeventConnectionMixin, self).close()
+            super().close()
 
         def __check_watchers(self):
             # We can be used from more than one thread in a sequential

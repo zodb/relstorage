@@ -25,9 +25,12 @@ from relstorage.tests import TestCase
 
 from .. import dialect
 
+
+
 class TestMissingDialect(TestCase):
 
     def test_boolean(self):
+        # pylint:disable=protected-access
         d = dialect._MissingDialect()
         self.assertFalse(d)
 

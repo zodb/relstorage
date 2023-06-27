@@ -61,7 +61,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         self._dsn = dsn
         self._twophase = twophase
         self._db_connect = driver.connect
-        super(CXOracleConnectionManager, self).__init__(options, driver)
+        super().__init__(options, driver)
 
     @metricmethod
     def open(self,
@@ -186,3 +186,4 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         if defaultType == self.driver.CLOB:
             # Default size for CLOB is 4000, we want the whole blob inline.
             return cursor.var(self.driver.LONG_STRING, arraysize=cursor.arraysize)
+        return None

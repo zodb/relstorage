@@ -77,7 +77,7 @@ class OracleAdapter(AbstractAdapter):
         self.mover = mover
         self.connmanager = connmanager
 
-        super(OracleAdapter, self).__init__(options)
+        super().__init__(options)
 
     def _create(self):
         driver = self.driver

@@ -77,7 +77,7 @@ class BenchCache(DetachableMVCCDatabaseViewer):
     local_client = None
 
     def __init__(self):
-        super(BenchCache, self).__init__()
+        super().__init__()
         self.adapter = BenchAdapter()
         self.local_client = BenchLocalClient()
 
@@ -123,6 +123,7 @@ def bench_multiunion_no_overlap(loops):
     duration = 0
     for _ in range(loops):
         begin = perf_counter()
+        # pylint:disable=protected-access
         OidTidMap._multiunion(maps)
         duration += perf_counter() - begin
 

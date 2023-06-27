@@ -16,6 +16,8 @@ from ...sql import it
 
 from ..dialect import OracleDialect
 
+# pylint:disable=protected-access
+
 class Context(object):
     keep_history = True
     dialect = OracleDialect()

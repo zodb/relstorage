@@ -56,7 +56,7 @@ class Sqlite3ObjectMover(AbstractObjectMover):
     def __init__(self, database_driver, options, runner=None,
                  version_detector=None,
                  batcher_factory=Sqlite3RowBatcher):
-        super(Sqlite3ObjectMover, self).__init__(
+        super().__init__(
             database_driver,
             options, runner=runner, version_detector=version_detector,
             batcher_factory=batcher_factory)
@@ -86,7 +86,7 @@ class Sqlite3ObjectMover(AbstractObjectMover):
             assert not cursor.connection.in_transaction
             cursor.connection.register_before_commit_cleanup(self._before_commit)
 
-        super(Sqlite3ObjectMover, self).on_store_opened(cursor, restart)
+        super().on_store_opened(cursor, restart)
 
     def _before_commit(self, connection, _rolling_back=None):
         # Regardless of whether we're rolling back or not we need to delete

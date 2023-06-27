@@ -16,6 +16,10 @@ from .dialect import DialectAware
 from .interfaces import INamedBindParam
 from .interfaces import IOrderedBindParam
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
+
 class Expression(DialectAware,
                  Resolvable):
     """
@@ -245,6 +249,11 @@ class ParamMixin(object):
         return orderedbindparam()
 
 class ExpressionOperatorMixin(object):
+    # These objects overload the operator to return things, not to
+    # actually implement the operation. So we don't need a hash()
+    # even though we have __eq__ and eq objects must have
+    # equal hashes.
+    # pylint:disable=eq-without-hash
     def __eq__(self, other):
         return EqualExpression(self, other)
 

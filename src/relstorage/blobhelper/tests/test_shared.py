@@ -1,5 +1,6 @@
 """Tests of relstorage.blobhelper"""
 # pylint:disable=too-many-public-methods,unused-argument
+# pylint:disable=protected-access
 
 import os
 

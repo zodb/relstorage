@@ -34,7 +34,7 @@ class Sqlite3OIDAllocator(AbstractRangedOIDAllocator):
     # ensure that it only ever has a single increasing row.
 
     def __init__(self, db_path, driver):
-        super(Sqlite3OIDAllocator, self).__init__()
+        super().__init__()
         self.db_path = db_path
         self.lock = threading.Lock()
         self.driver = driver

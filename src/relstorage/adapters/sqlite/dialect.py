@@ -68,7 +68,7 @@ class _Sqlite3UpsertCompiler(DefaultCompiler):
         if identifier == "transaction":
             # Sigh. This has to be quoted for some reason.
             quoted = True
-        super(_Sqlite3UpsertCompiler, self).emit_identifier(identifier, quoted)
+        super().emit_identifier(identifier, quoted)
 
     def _placeholder(self, key):
         if key == '?':

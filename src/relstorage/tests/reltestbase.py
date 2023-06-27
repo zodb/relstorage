@@ -61,7 +61,7 @@ from ZODB.tests.MinPO import MinPO
 
 from . import fakecache
 from . import util
-from . import mock
+from unittest import mock
 from . import TestCase
 from . import StorageCreatingMixin
 from . import skipIfNoConcurrentWriters
@@ -132,11 +132,11 @@ class StorageClientThread(MTStorage.StorageClientThread):
 
     def __init__(self, storage, *args, **kwargs):
         storage = storage.new_instance()
-        super(StorageClientThread, self).__init__(storage, *args, **kwargs)
+        super().__init__(storage, *args, **kwargs)
 
     def runtest(self):
         try:
-            super(StorageClientThread, self).runtest()
+            super().runtest()
         finally:
             self.storage.release()
             self.storage = None
@@ -175,6 +175,10 @@ class ThreadWrapper(object):
 
     def __getattr__(self, name):
         return getattr(self.__storage, name)
+
+    # We can't use with, we take them and release them in
+    # separate methods
+    # pylint:disable=consider-using-with
 
     def tpc_begin(self, txn):
         self.__commit_lock.acquire()
@@ -222,7 +226,7 @@ class UsesThreadsOnASingleStorageMixin(object):
 
     def __generic_wrapped_test(self, meth_name):
         meth = getattr(
-            super(UsesThreadsOnASingleStorageMixin, self),
+            super(),
             meth_name)
         try:
             with self.__thread_safe_wrapper():
@@ -268,7 +272,7 @@ class GenericRelStorageTests(
         # could add things first)
         self.addCleanup(os.chdir, os.getcwd())
 
-        super(GenericRelStorageTests, self).setUp()
+        super().setUp()
         # PackableStorage is particularly bad about leaving things
         # dangling. For example, if the ClientThread runs into
         # problems, it doesn't close its connection, which can leave
@@ -307,13 +311,13 @@ class GenericRelStorageTests(
 
     def tearDown(self):
         PackableStorage.DB = DB
-        super(GenericRelStorageTests, self).tearDown()
+        super().tearDown()
 
     def _make_readonly(self):
         # checkWriteMethods in ReadOnlyStorage assumes that
         # the object has an undo() method, even though that's only
         # required if it's IStorageUndoable, aka history-preserving.
-        super(GenericRelStorageTests, self)._make_readonly()
+        super()._make_readonly()
         storage = self._storage
         if not hasattr(storage, 'undo'):
             def undo(*args, **kwargs):
@@ -388,7 +392,7 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = u'invalidation test'
+            t.description = 'invalidation test'
             c1.tpc_begin(t)
             c1.commit(t)
             storage.tpc_vote(storage._transaction)
@@ -419,7 +423,7 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = u'isolation test 1'
+            t.description = 'isolation test 1'
             c1.tpc_begin(t)
             c1.commit(t)
             storage.tpc_vote(storage._transaction)
@@ -445,7 +449,7 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = u'isolation test 2'
+            t.description = 'isolation test 2'
             c1.tpc_begin(t)
             c1.commit(t)
             storage.tpc_vote(storage._transaction)
@@ -740,7 +744,7 @@ class GenericRelStorageTests(
             c = db.open()
             r = c.root()
             r['key'] = 1
-            transaction.get().note(u'A long description. ' * 1000)
+            transaction.get().note('A long description. ' * 1000)
             transaction.commit()
         finally:
             db.close()
@@ -1046,7 +1050,7 @@ class GenericRelStorageTests(
             # Try to load an object, which should cause ReadConflictError.
             r._p_deactivate()
             with self.assertRaises(ReadConflictError):
-                r.__getitem__('beta')
+                r.__getitem__('beta') # pylint:disable=unnecessary-dunder-call
 
         finally:
             db.close()
@@ -1105,7 +1109,7 @@ class GenericRelStorageTests(
 
     @util.skipOnAppveyor("Random failures")
     # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.75/job/32uu4xdp5mubqma8
-    def checkBTreesLengthStress(self):
+    def checkBTreesLengthStress(self): # pylint:disable=too-complex
         # BTrees.Length objects are unusual Persistent objects: they
         # have a conflict resolution algorithm that cannot fail, so if
         # we do get a failure it's due to a problem with us.
@@ -1223,7 +1227,7 @@ class GenericRelStorageTests(
             if replica_fn:
                 replica_conf = 'replica-conf ' + self.get_adapter_zconfig_replica_conf()
 
-        conf = u"""
+        conf = """
         %import relstorage
         <zodb main>
             <relstorage>
@@ -1248,7 +1252,7 @@ class GenericRelStorageTests(
 
         __traceback_info__ = conf
 
-        schema_xml = u"""
+        schema_xml = """
         <schema>
         <import package="ZODB"/>
         <section type="ZODB.database" name="main" attribute="database"/>
@@ -1477,7 +1481,7 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     relstorage_name = 'destination'
 
     def setUp(self):
-        super(AbstractRSZodbConvertTests, self).setUp()
+        super().setUp()
         # Zap the storage
         self.make_storage(zap=True).close()
 
@@ -1494,7 +1498,7 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
 
 
     def _cfg_header(self):
-        return '%import relstorage\n' + super(AbstractRSZodbConvertTests, self)._cfg_header()
+        return '%import relstorage\n' + super()._cfg_header()
 
     def _cfg_relstorage(self, name, _path, blob_dir):
         cfg = dedent("""
@@ -1612,7 +1616,7 @@ class AbstractToFileStorage(RelStorageTestBase):
     # class that will be cleaned up by tearDown().
 
     def setUp(self):
-        super(AbstractToFileStorage, self).setUp()
+        super().setUp()
         # Use the abspath so that even if we close it after
         # we've returned to our original directory (e.g.,
         # close is run as part of addCleanup(), which happens after
@@ -1635,7 +1639,7 @@ class AbstractToFileStorage(RelStorageTestBase):
         if hasattr(self.__dst, 'close'):
             _close_and_clean_storage(self.__dst)
         self.__dst = 42 # Not none so we don't try to create.
-        super(AbstractToFileStorage, self).tearDown()
+        super().tearDown()
 
     def new_dest(self):
         return self._closing(FileStorage(self._dst_path))
@@ -1645,7 +1649,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
     # As for AbstractToFileStorage
 
     def setUp(self):
-        super(AbstractFromFileStorage, self).setUp()
+        super().setUp()
         self._src_path = os.path.abspath(self.rs_temp_prefix + 'Source.fs')
         self.__dst = None
 
@@ -1664,7 +1668,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
             _close_and_clean_storage(self.__dst)
 
         self.__dst = 42 # Not none so we don't try to create.
-        super(AbstractFromFileStorage, self).tearDown()
+        super().tearDown()
 
     def new_dest(self):
         return self._dst

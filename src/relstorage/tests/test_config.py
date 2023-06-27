@@ -25,7 +25,7 @@ import unittest
 from relstorage import config
 from relstorage import options
 
-from . import mock
+from unittest import mock
 
 class MockZConfig(object):
 
@@ -54,6 +54,9 @@ class MockAdapter(object):
 
     def __eq__(self, other):
         return isinstance(other, MockAdapter)
+
+    def __hash__(self):
+        return 42
 
 class TestConfig(unittest.TestCase):
 
@@ -115,6 +118,7 @@ class TestOptions(unittest.TestCase):
 
     def test_deprecated_warnings(self):
         import warnings
+        # pylint:disable-next=protected-access
         for name in options.Options._deprecated_options:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter('default')

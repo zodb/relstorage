@@ -75,6 +75,7 @@ class ScriptRunner(object):
         stmt = generic_stmt.format(**self.format_vars)
         if '%(' in stmt and ')s' in stmt:
             __traceback_info__ = stmt, self.script_vars
+            # pylint:disable=consider-using-augmented-assign
             stmt = stmt % self.script_vars
         __traceback_info__ = stmt
         try:

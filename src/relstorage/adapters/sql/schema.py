@@ -29,6 +29,9 @@ from .query import Query
 
 _marker = object()
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
 class Column(ExpressionOperatorMixin):
     """
     Defines a column in a table.
@@ -266,7 +269,7 @@ class View(DialectAware,
         # The column names can't be qualified against the original table,
         # they disappear, so we need to rebind them against a new table.
         columns = [copy(c) for c in select.column_list]
-        super(View, self).__init__(name, *columns)
+        super().__init__(name, *columns)
         self.select = select
 
     def _emit_create_prefix(self, compiler):
@@ -304,7 +307,7 @@ class _CompositeTableMixin(DialectAware,
     def _bound_to(self, context, dialect):
         for v in self._bind_vars_ignored:
             self.__dict__.pop(v, None)
-        return super(_CompositeTableMixin, self)._bound_to(context, dialect)
+        return super()._bound_to(context, dialect)
 
     @Lazy
     def c(self):
@@ -369,7 +372,7 @@ class _JoinedTable(_CompositeTableMixin):
 
     def join_kind(self, kind):
         s = copy(self)
-        s._JOIN_KW = kind
+        s._JOIN_KW = kind # pylint:disable=protected-access
         return s
 
     def __repr__(self):
@@ -397,7 +400,7 @@ class _InnerJoinBuilder(object):
 class UsingJoinedTable(_JoinedTable):
 
     def __init__(self, lhs, rhs, columns):
-        super(UsingJoinedTable, self).__init__(lhs, rhs)
+        super().__init__(lhs, rhs)
         self._join_columns = Columns(columns)
 
     def _get_join_columns(self, lhs, rhs):

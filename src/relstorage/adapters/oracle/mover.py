@@ -88,11 +88,14 @@ class OracleObjectMover(OracleRowBatcherStoreTemps,
         """
         cursor.execute(stmt, (oid, tid))
         rows = cursor.fetchall()
-        if rows:
-            # XXX: If we can use rowcount here, we can combine
-            # with superclass.
-            assert len(rows) == 1
-            return rows[0][0]
+        if not rows:
+            return None
+
+        # XXX: If we can use rowcount here, we can combine
+        # with superclass.
+        assert len(rows) == 1
+        return rows[0][0]
+
 
     # no store connection initialization needed for Oracle
     def on_store_opened(self, cursor, restart=False):
@@ -133,6 +136,7 @@ class OracleObjectMover(OracleRowBatcherStoreTemps,
                 )
 
         else:
+            # pylint:disable=else-if-used
             # Send as a BLOB
             if self.keep_history:
                 row = {
@@ -202,7 +206,7 @@ class OracleObjectMover(OracleRowBatcherStoreTemps,
                     break
 
                 if f is None:
-                    f = open(filename, 'wb')
+                    f = open(filename, 'wb') # pylint:disable=consider-using-with
                 # round off the chunk-size to be a multiple of the oracle
                 # blob chunk size to maximize performance
                 read_chunk_size = int(
@@ -272,6 +276,7 @@ class OracleObjectMover(OracleRowBatcherStoreTemps,
 
         f = open(filename, 'rb')
         blob_var = cursor.var(self.driver.BLOB)
+        # pylint:disable=use-dict-literal
         params = dict(oid=oid, chunk_num=0, newblob=blob_var)
         if use_tid:
             params['tid'] = tid

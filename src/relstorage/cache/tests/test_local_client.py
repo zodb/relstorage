@@ -26,6 +26,8 @@ from . import list_lrukeys as list_lrukeys_
 from . import list_lrufreq as list_lrufreq_
 from .test_memcache_client import AbstractStateCacheTests
 
+# pylint:disable=protected-access
+# pylint:disable=unnecessary-dunder-call
 
 class LocalClientStrKeysValuesGenerationalTests(TestCase):
     """

@@ -35,7 +35,7 @@ class MySQLCompiler(Compiler):
         # If there are params, we can't prepare unless we're using
         # the binary protocol; otherwise we have to SET user variables
         # with extra round trips, which is worse.
-        return not self.placeholders and super(MySQLCompiler, self).can_prepare()
+        return not self.placeholders and super().can_prepare()
 
     _PREPARED_CONJUNCTION = 'FROM'
 
@@ -142,7 +142,7 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     _init_command = ''
 
     def __init__(self):
-        super(AbstractMySQLDriver, self).__init__()
+        super().__init__()
 
         kv = ["%s=%s" % (k, v) for k, v in self.MY_SESSION_VARS.items()]
         self._init_command = "SET " + ", ".join(kv)
@@ -156,13 +156,13 @@ class AbstractMySQLDriver(AbstractModuleDriver):
             cursor = conn.cursor(self._server_side_cursor)
             cursor.arraysize = self.cursor_arraysize
         else:
-            cursor = super(AbstractMySQLDriver, self).cursor(conn, server_side=False)
+            cursor = super().cursor(conn, server_side=False)
         return cursor
 
     def connect(self, *args, **kwargs):
         if self._init_command:
             kwargs['init_command'] = self._init_command
-        return super(AbstractMySQLDriver, self).connect(*args, **kwargs)
+        return super().connect(*args, **kwargs)
 
     def synchronize_cursor_for_rollback(self, cursor):
         """Does nothing."""

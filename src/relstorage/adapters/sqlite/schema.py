@@ -43,7 +43,7 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
     def __init__(self, driver, oid_allocator, **kwargs):
         self.driver = driver
         self.oid_allocator = oid_allocator
-        super(Sqlite3SchemaInstaller, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def get_database_name(self, cursor):
         return os.path.splitext(
@@ -75,5 +75,5 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
         self.oid_allocator.reset_oid()
 
     def drop_all(self):
-        super(Sqlite3SchemaInstaller, self).drop_all()
+        super().drop_all()
         self.oid_allocator.reset_oid()

@@ -11,6 +11,9 @@ from copy import copy as stdlib_copy
 
 from .interfaces import IBindParam
 
+# pylint objects to __compile_visit.*__
+# pylint:disable=bad-dunder-name
+
 def copy(obj):
     """
     Make a shallow copy of the object, ignoring any volatile attributes.
@@ -126,8 +129,8 @@ class Columns(object):
         """
         seen_combining = set()
         columns = []
-
-        for c in self._columns + other._columns:
+        # Other is also a Columns object.
+        for c in self._columns + other._columns: # pylint:disable=protected-access
             if c.name in combining:
                 if c.name not in seen_combining:
                     columns.append(c)
@@ -155,3 +158,11 @@ class Columns(object):
             return self.as_dict() == other.as_dict()
         except AttributeError:
             return NotImplemented
+
+    def __hash__(self):
+        # We don't expect to hash these. But if you define __eq__,
+        # you should also define __hash__, because equal objects should have
+        # equal hashes. We can meet that requirement with poor efficiency by
+        # using a constant hash (because who knows if our sub-objects
+        # are hashable).
+        return 42

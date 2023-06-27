@@ -33,7 +33,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
-        super(Psycopg2ConnectionManager, self).__init__(options, driver)
+        super().__init__(options, driver)
 
 
     def _alter_dsn(self, replica):

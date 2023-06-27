@@ -179,6 +179,7 @@ class _AbstractCopier(object):
                 logger.exception("Failed to open blob to copy")
 
         # We may not be able to read the data after this.
+        # pylint:disable-next=protected-access
         data = self.restore._crs_transform_record_data(data)
         if blobfile is not None:
             fd, name = tempfile.mkstemp(
@@ -217,7 +218,7 @@ class _HistoryPreservingCopier(_AbstractCopier):
     )
 
     def __init__(self, storage, blobhelper, tpc, restore):
-        super(_HistoryPreservingCopier, self).__init__(storage, blobhelper, tpc, restore)
+        super().__init__(storage, blobhelper, tpc, restore)
         self.storage_it = storage.iterator()
 
     def _compute_total_count(self):
@@ -243,7 +244,7 @@ class _HistoryPreservingCopier(_AbstractCopier):
     def close(self):
         close(self.storage_it)
         self.storage_it = None
-        super(_HistoryPreservingCopier, self).close()
+        super().close()
 
     def copy(self, progress):
         # type: (_ProgressLogger) -> None
@@ -300,12 +301,12 @@ class _RecordIternextIterator(object):
             self.cookie = None
         try:
             result = self.storage.record_iternext(self.cookie)
-        except ValueError:  # pragma: no cover
+        except ValueError as exc:  # pragma: no cover
             # FileStorage can raise this if the underlying storage
             # is completely empty.
             # See https://github.com/zopefoundation/ZODB/issues/330
             if self.cookie is None:
-                raise StopIteration
+                raise StopIteration from exc
             raise # pragma: no cover
 
         oid, tid, state, self.cookie = result

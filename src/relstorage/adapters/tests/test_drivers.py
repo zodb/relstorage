@@ -29,6 +29,8 @@ from ..interfaces import IDBDriverOptions
 
 from .. import drivers as abstract_drivers
 
+# pylint:disable=protected-access
+
 @implementer(IDBDriverOptions)
 class MockDrivers(object):
     database_type = 'mock'

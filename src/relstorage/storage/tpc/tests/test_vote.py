@@ -17,6 +17,7 @@ from relstorage.tests import MockAdapter as _MockAdapter
 from ...interfaces import ITPCStateVoting
 from .. import SharedTPCState
 
+# pylint:disable=protected-access
 
 class MockConnection(object):
 

@@ -1213,6 +1213,7 @@ class HistoryFreePackUndo(PackUndo):
         Because *load_connection* is read-only and repeatable read,
         we don't need to do any object-level locking.
         """
+        # pylint:disable=too-many-locals
         # Begin by ensuring we have a snapshot reflecting anything
         # committed up to this point, including the contents of
         # ``pack_object``, which determines the visible objects
@@ -1739,6 +1740,7 @@ class _Progress(object):
                 _, begin, _ = mark
                 _, end, _ = self.marks[i + 1]
                 return end - begin
+        return None
 
     @property
     def duration(self):

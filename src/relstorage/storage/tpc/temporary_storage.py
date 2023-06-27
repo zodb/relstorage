@@ -39,6 +39,7 @@ class TPCTemporaryStorage(object):
         # start with a fresh in-memory buffer instead of reusing one that might
         # already be spooled to disk.
         # TODO: An alternate idea would be a temporary sqlite database.
+        # pylint:disable-next=consider-using-with
         self._queue = SpooledTemporaryFile(max_size=10 * 1024 * 1024)
         # {oid: (startpos, endpos, prev_tid_int)}
         self._queue_contents = OidObjectMap()

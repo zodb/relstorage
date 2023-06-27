@@ -39,11 +39,9 @@ class ReplicaSelector(object):
     def _read_config(self):
         self._config_modified = os.path.getmtime(self.replica_conf)
         self._config_checked = time.time()
-        f = open(self.replica_conf, 'r')
-        try:
+        with open(self.replica_conf, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        finally:
-            f.close()
+
         replicas = []
         for line in lines:
             line = line.strip()

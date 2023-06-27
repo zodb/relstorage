@@ -18,7 +18,7 @@ class TestBlobMixin(object):
     DEFAULT_BLOB_STORAGE_KWARGS = {}
 
     def setUp(self):
-        super(TestBlobMixin, self).setUp()
+        super().setUp()
         setUp(self)
         self._timer = MonotonicallyIncreasingTimeLayerMixin()
         self._timer.testSetUp()
@@ -42,7 +42,7 @@ class TestBlobMixin(object):
         self.blob_storage.close()
         self._timer.testTearDown()
         tearDown(self)
-        super(TestBlobMixin, self).tearDown()
+        super().tearDown()
 
     def _count_and_size_blobs_in_directory(self):
         size = 0

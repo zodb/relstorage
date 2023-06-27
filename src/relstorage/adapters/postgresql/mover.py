@@ -40,7 +40,7 @@ class PostgreSQLRowBatcherStoreTemps(RowBatcherStoreTemps):
 class PostgreSQLObjectMover(AbstractObjectMover):
 
     def __init__(self, *args, **kwargs):
-        super(PostgreSQLObjectMover, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         if not self.driver.supports_copy:
             batcher = PostgreSQLRowBatcherStoreTemps(self.keep_history,
                                                      self.driver.Binary,
@@ -208,6 +208,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         blob.close()
 
         # Now put it into our blob_chunk table.
+        # pylint:disable=use-dict-literal
         params = dict(oid=oid, chunk_num=0, loid=blob.oid)
         if use_tid:
             params['tid'] = tid
@@ -260,7 +261,7 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
     COPY_COMMAND_TMPL = "COPY {NAME} (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
 
     def __init__(self, table, state_oid_tid_iterable, digester):
-        super(TempStoreCopyBuffer, self).__init__()
+        super().__init__()
         self.COPY_COMMAND = self.COPY_COMMAND_TMPL.format(NAME=table)
         self.state_oid_tid_iterable = state_oid_tid_iterable
         self._iter = iter(state_oid_tid_iterable)

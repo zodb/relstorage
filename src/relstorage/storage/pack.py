@@ -116,7 +116,7 @@ class Pack(object):
         if tid_int is None:
             logger.debug("all transactions before %s have already "
                          "been packed", time.ctime(t))
-            return
+            return None
 
         s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
         logger.info("Analyzing transactions committed %s or before (TID %d)",
@@ -208,6 +208,7 @@ class Pack(object):
                 tid_int = self.__pre_pack(t, referencesf)
             else:
                 # Need to determine the tid_int from the pack_object table
+                # pylint:disable-next=protected-access
                 tid_int = self.packundo._find_pack_tid()
 
             if not prepack_only:

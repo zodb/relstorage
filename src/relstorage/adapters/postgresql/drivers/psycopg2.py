@@ -58,7 +58,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
     PRIORITY_PYPY = 2
 
     def __init__(self):
-        super(Psycopg2Driver, self).__init__()
+        super().__init__()
 
         psycopg2 = self.get_driver_module()
 
@@ -121,7 +121,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
 
     def get_driver_module(self):
         self._check_wait_callback()
-        return super(Psycopg2Driver, self).get_driver_module()
+        return super().get_driver_module()
 
     def connect_with_isolation(self, dsn,
                                isolation=None,
@@ -149,7 +149,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
             cursor.arraysize = self.cursor_arraysize
             cursor.itersize = self.cursor_arraysize
         else:
-            cursor = super(Psycopg2Driver, self).cursor(conn)
+            cursor = super().cursor(conn)
         return cursor
 
     def debug_connection(self, conn, *extra): # pragma: no cover
@@ -231,7 +231,7 @@ class GeventPsycopg2Driver(GeventDriverMixin, Psycopg2Driver):
 
     def _create_connection(self, mod, *extra_slots):
         if getattr(mod, 'RSGeventPsycopg2Connection', self) is self:
-            Base = super(GeventPsycopg2Driver, self)._create_connection(mod, *extra_slots)
+            Base = super()._create_connection(mod, *extra_slots)
 
             class RSGeventPsycopg2Connection(GeventConnectionMixin,
                                              LobConnectionMixin,
@@ -250,13 +250,13 @@ class GeventPsycopg2Driver(GeventDriverMixin, Psycopg2Driver):
 
                 def commit(self):
                     try:
-                        super(RSGeventPsycopg2Connection, self).commit()
+                        super().commit()
                     finally:
                         self._in_critical_phase = False
 
                 def rollback(self):
                     try:
-                        super(RSGeventPsycopg2Connection, self).rollback()
+                        super().rollback()
                     finally:
                         self._in_critical_phase = False
 
@@ -269,7 +269,7 @@ class GeventPsycopg2Driver(GeventDriverMixin, Psycopg2Driver):
         # will prevent this driver from being used.
         # TODO: Unify this better with inheritance.
         __import__('gevent')
-        return super(GeventPsycopg2Driver, self).get_driver_module()
+        return super().get_driver_module()
 
     _WANT_WAIT_CALLBACK = True
 

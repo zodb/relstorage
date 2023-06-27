@@ -120,7 +120,7 @@ init-hook =
 # readable, thing
 # unnecessary-lambda-assignment: We use this pattern a fair amount
 # redefined-variable-type: Fairly common
-
+# compare-to-zero: Often makes things less readable; an explicit == 0 can be better than 'not foo'
 disable=wrong-import-position,
     wrong-import-order,
     missing-docstring,
@@ -140,6 +140,9 @@ disable=wrong-import-position,
     unnecessary-lambda-assignment,
     redefined-variable-type,
     cyclic-import,
+    compare-to-zero,
+    missing-param-doc,
+    missing-type-doc,
 
 enable=consider-using-augmented-assign
 
@@ -195,8 +198,11 @@ max-complexity=11
 # pylint leaves it off. This is the proximal cause of the
 # undefined-all-variable crash.
 unsafe-load-any-extension = yes
+extension-pkg-allow-list = relstorage.cache._objectindex,relstorage.cache.cache,relstorage._inthashmap
 # This does not seem to work, hence the init-hook
 property-classes=zope.cachedescriptors.property.Lazy,zope.cachedescriptors.property.Cached
+
+
 
 [CLASSES]
 # List of interface methods to ignore, separated by a comma. This is used for

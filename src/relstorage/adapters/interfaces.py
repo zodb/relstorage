@@ -59,34 +59,34 @@ class IDBDriver(Interface):
     __name__ = Attribute("The name of this driver")
 
     disconnected_exceptions = Tuple(
-        description=(u"A tuple of exceptions this driver can raise on any operation if it is "
-                     u"disconnected from the database."),
+        description=("A tuple of exceptions this driver can raise on any operation if it is "
+                     "disconnected from the database."),
         value_type=Factory(IException)
     )
 
     close_exceptions = Tuple(
-        description=(u"A tuple of exceptions that we can ignore when we try to "
-                     u"close the connection to the database. Often this is the same "
-                     u"or an extension of `disconnected_exceptions`."
-                     u"These exceptions may also be ignored on rolling back the connection, "
-                     u"if we are otherwise completely done with it and prepared to drop it. "),
+        description=("A tuple of exceptions that we can ignore when we try to "
+                     "close the connection to the database. Often this is the same "
+                     "or an extension of `disconnected_exceptions`."
+                     "These exceptions may also be ignored on rolling back the connection, "
+                     "if we are otherwise completely done with it and prepared to drop it. "),
         value_type=Factory(IException),
     )
 
     lock_exceptions = Tuple(
-        description=u"A tuple of exceptions",
+        description="A tuple of exceptions",
         value_type=Factory(IException),
     ) # XXX: Document
 
     use_replica_exceptions = Tuple(
-        description=(u"A tuple of exceptions raised by connecting "
-                     u"that should cause us to try a replica."),
+        description=("A tuple of exceptions raised by connecting "
+                     "that should cause us to try a replica."),
         value_type=Factory(IException)
     )
 
     Binary = Attribute("A callable.")
 
-    dialect = Object(IDBDialect, description=u"The IDBDialect for this driver.")
+    dialect = Object(IDBDialect, description="The IDBDialect for this driver.")
 
     cursor_arraysize = Attribute(
         "The value to assign to each new cursor's ``arraysize`` attribute.")
@@ -252,7 +252,7 @@ class DriverNotAvailableError(Exception):
     reason = None
 
     def __init__(self, driver_name, driver_options=None, reason=None):
-        super(DriverNotAvailableError, self).__init__(driver_name)
+        super().__init__(driver_name)
         self.driver_name = driver_name
         self.driver_options = driver_options
         self.reason = reason
@@ -304,7 +304,7 @@ class NoDriversAvailableError(DriverNotAvailableError):
     """
 
     def __init__(self, driver_name='auto', driver_options=None, reason=None):
-        super(NoDriversAvailableError, self).__init__(driver_name, driver_options, reason)
+        super().__init__(driver_name, driver_options, reason)
 
 
 class IDBDriverOptions(Interface):
@@ -572,11 +572,6 @@ class IManagedDBConnection(Interface):
     def __bool__():
         """
         Return true if the database connection is believed to be ready to use.
-        """
-
-    def __nonzero__():
-        """
-        Same as __bool__ for Python 2.
         """
 
     def drop():
@@ -1248,7 +1243,7 @@ class IRelStorageAdapter(Interface):
     driver = Object(IDBDriver)
     connmanager = Object(IConnectionManager)
     dbiter = Object(IDatabaseIterator)
-    keep_history = Bool(description=u"True if this adapter supports undo")
+    keep_history = Bool(description="True if this adapter supports undo")
     locker = Object(ILocker)
     mover = Object(IObjectMover)
     oidallocator = Object(IOIDAllocator)

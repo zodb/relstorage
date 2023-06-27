@@ -43,7 +43,7 @@ from .scriptrunner import Sqlite3ScriptRunner
 
 
 @implementer(IRelStorageAdapter)
-class Sqlite3Adapter(AbstractAdapter):
+class Sqlite3Adapter(AbstractAdapter): # pylint:disable=too-many-instance-attributes
     """
     Adapter for sqlite.
     """
@@ -61,7 +61,7 @@ class Sqlite3Adapter(AbstractAdapter):
         self.locker = locker
         self.mover = mover
         self.connmanager = connmanager
-        super(Sqlite3Adapter, self).__init__(options)
+        super().__init__(options)
 
     def _create(self):
         driver = self.driver

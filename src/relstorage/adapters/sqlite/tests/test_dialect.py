@@ -21,6 +21,8 @@ from relstorage.adapters.sql.tests import test_sql
 
 from .. import dialect
 
+# pylint:disable=protected-access
+
 class TestSQLiteUpsertDialect(test_sql.TestUpsert):
     keep_history = False
     dialect = dialect.Sqlite3Dialect()

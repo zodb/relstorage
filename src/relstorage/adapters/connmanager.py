@@ -58,7 +58,7 @@ def _connection_callback_open_args(connmanager, callback):
     read_only = getattr(callback, 'transaction_read_only', None)
     deferrable = getattr(callback, 'transaction_deferrable', None)
     application_name = getattr(callback, 'transaction_application_name', None)
-    return dict(
+    return dict( # pylint:disable=use-dict-literal
         isolation=isolation or connmanager.isolation_store,
         read_only=read_only or False,
         deferrable=deferrable or False,
@@ -73,6 +73,7 @@ class AbstractConnectionManager(object):
 
     Responsible for opening and closing database connections.
     """
+    # pylint:disable=too-many-instance-attributes
 
     # a series of callables (cursor, restart=bool)
     # for when a store connection is opened.
