@@ -52,6 +52,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     ## export XDG_CACHE_HOME="/cache"
     id
     ls -ld /cache
+    mkdir -p /cache/pip
     ls -ld /cache/pip
 
     yum -y install ccache

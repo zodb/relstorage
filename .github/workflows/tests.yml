@@ -101,6 +101,9 @@ jobs:
           cache: 'pip'
           cache-dependency-path: setup.py
 
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
 
