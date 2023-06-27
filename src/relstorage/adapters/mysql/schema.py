@@ -91,7 +91,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def __init__(self, driver=None, version_detector=None, **kwargs):
         self.driver = driver
         self.version_detector = version_detector or MySQLVersionDetector()
-        super(MySQLSchemaInstaller, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
@@ -141,7 +141,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         return [self._metadata_to_native_str(r[0]) for r in cursor]
 
     def check_compatibility(self, cursor, tables):
-        super(MySQLSchemaInstaller, self).check_compatibility(cursor, tables)
+        super().check_compatibility(cursor, tables)
         tables_that_are_not_innodb = self.__list_tables_not_innodb(cursor)
         if tables_that_are_not_innodb:
             raise StorageError(
@@ -198,11 +198,11 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def _prepare_with_connection(self, conn, cursor):
         from .oidallocator import MySQLOIDAllocator
         self.__convert_all_tables_to_innodb(cursor)
-        super(MySQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
+        super()._prepare_with_connection(conn, cursor)
         MySQLOIDAllocator(self.driver).garbage_collect_oids(cursor)
 
     def _read_proc_files(self):
-        name_to_source = super(MySQLSchemaInstaller, self)._read_proc_files()
+        name_to_source = super()._read_proc_files()
 
         for proc_name, source in name_to_source.items():
             # No leading or trailing lines allowed, only the procedure
@@ -212,7 +212,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             assert proc_name in source
         return name_to_source
 
-    def create_procedures(self, cursor):
+    def create_procedures(self, cursor): # pylint:disable=too-many-locals
         # Apparently procedures remember the ``character_set_client`` and ``collation_connection``
         # that was in use at the time they were defined, and use that
         # to perform implicit conversions on arguments and even internally. If we have
@@ -240,8 +240,22 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             set_lock_timeout = 'SET innodb_lock_wait_timeout = 1;'
             for_share = 'LOCK IN SHARE MODE'
 
-        cursor.execute('SET SESSION character_set_client = utf8, '
-                       'collation_connection = utf8_general_ci')
+        # MySQL added the utf8mb4 charset in version 5.5.3. utf8mb4
+        # fully implements the current standard. Now utf8 is an alias
+        # for utf8mb3 and will be switched to utf8mb4.
+        # collation names: charset-algo-case
+        # algo: bin (binary); general (simplified, speedy); unicode (full)
+        # case: ci (insensitive); cs (sensitive)
+        #
+        # XXX: MySqlConnectorPython is complaining about encoding in >= 8.0.32:
+        # mysql.connector.errors.Warning: (
+        #   1300,
+        #    bytearray(b"Invalid utf8mb4 character string: \'800363\'"))
+        #
+        # On ``INSERT INTO object_state...`` where the values are all parameterized
+        # and are all bytstrings
+        cursor.execute('SET SESSION character_set_client = utf8mb4, '
+                       'collation_connection = utf8mb4_general_ci')
 
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
@@ -289,7 +303,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             self.create_tables(cursor)
             logger.debug("Done creating tables after drop")
         else:
-            super(MySQLSchemaInstaller, self)._after_zap_all_tables(cursor, slow)
+            super()._after_zap_all_tables(cursor, slow)
 
 
 class MySQLVersionDetector(DatabaseHelpersMixin):

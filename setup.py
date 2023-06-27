@@ -71,7 +71,8 @@ tests_require = [
     'zc.zlibstorage',
     'zope.testrunner',
     'nti.testing',
-    'gevent >= 1.5a1',
+    # At this writing, gevent isn't supported on 3.12 yet.
+    'gevent >= 1.5a1; python_version < "3.12"',
     'pyperf',
     # Versions of PyPy2 prior to 7.4 (maybe?) are incompatible with
     # psutil >= 5.6.4.
@@ -210,7 +211,7 @@ setup(
 
         # pylint:disable=line-too-long
         'mysql:platform_python_implementation=="CPython" and (sys_platform != "win32")': [
-            'mysqlclient >= 1.4, != 2.0.0',
+            'mysqlclient >= 2.0.0',
         ],
         'mysql:platform_python_implementation=="PyPy" or (sys_platform == "win32")': [
             'PyMySQL>=0.6.6',
@@ -261,28 +262,22 @@ setup(
             # up too heavy for better parallelism.
 
             # First, mysql
-            # pymysql on 3.6 on all platforms. We get coverage data from Travis,
-            # and we get 2.7 from PyPy and Windows.
-            'PyMySQL >= 0.6.6; python_version == "3.7" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
-            # mysqlclient (binary) on all CPythons. It's the default,
-            # except on old Windows. We get coverage from Travis.
-            'mysqlclient >= 1.4,!=2.0.0;platform_python_implementation=="CPython" and (sys_platform != "win32")',
-            # mysql-connector-python on Python 3.7 for coverage on Travis and ensuring it works
-            # on Windows, and PyPy for testing there, since it's one of two pure-python versions.
-            #'mysql-connector-python >= 8.0.16; python_version == "3.7"',
-            # 8.0.24 (!) quietly dropped support for Python 2, but they didn't set the
-            # PyPI metadata right at least up through 8.0.26, so we get an incompatible version
-            # without this pin.
-            #'mysql-connector-python >= 8.0.16, < 8.0.24; platform_python_implementation == "PyPy"',
+            # pymysql on 3.6 on all platforms.
+            'PyMySQL >= 0.6.6',
+            # mysqlclient (binary) on all CPythons. It's the default.
+            'mysqlclient >= 2.0.0',
+            # mysql-connector-python; one of two pure-python versions
+            # XXX: >= 8.0.32 has issues with binary values!
+            'mysql-connector-python == 8.0.31; python_version == "3.11"',
+
             # postgresql
             # pure-python
-            # pg8000 on Python 2.7 or PyPy. We get coverage from Travis, and we also
-            # get Windows.
-            'pg8000 >= 1.11.0 ; python_version == "2.7" or platform_python_implementation == "PyPy"',
+            # pg8000
+            'pg8000 >= 1.11.0',
             # CFFI, runs on all implementations.
             # We get coverage from 3.x on Travis and verification it works on Windows from Travis.
             # We get 2.7 testing from PyPy on Travis.
-            'psycopg2cffi >= 2.7.4; python_version == "3.6" or platform_python_implementation == "PyPy"',
+            'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
             'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
         ],

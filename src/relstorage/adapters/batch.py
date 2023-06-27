@@ -360,6 +360,6 @@ class RowBatcher(object): # pylint:disable=too-many-instance-attributes
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)
             # <suffix>
-            __traceback_info__ = stmt
+            __traceback_info__ = stmt, params
             self.cursor.execute(stmt, params)
         return count

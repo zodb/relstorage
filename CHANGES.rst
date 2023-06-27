@@ -9,6 +9,7 @@
   everything less than 3.7.
 - Add the "Requires Python" metadata to prevent installation on Python
   < 3.7.
+- The minimum supported version of MySQL is 5.3.3.
 
 
 3.5.0 (2022-09-16)
