@@ -206,13 +206,16 @@ class TestEntryPoints(unittest.TestCase):
                                         module="relstorage.zodburi_resolver",
                                         name=name,)
         else:
-            # Prior to 3.10, we have to do this all manually.
+            # Prior to 3.10, we have to do this all manually (keyword selection
+            # was introduced in 3.10). Prior to 3.9, there is no ``.module`` attribute,
+            # so we have to look at the entire ``.value``.
+            #
             ep_dict = entry_points()
             entry_point, = (
                 ep
                 for ep
                 in ep_dict['zodburi.resolvers']
-                if ep.name == name and ep.module == 'relstorage.zodburi_resolver'
+                if ep.name == name and ep.value.startswith('relstorage.zodburi_resolver:')
             )
 
         target = entry_point.load()

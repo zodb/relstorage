@@ -130,6 +130,8 @@ setup(
     setup_requires=[
     ],
     install_requires=[
+        # PyPA standard version and requirement handling.
+        'packaging',
         'perfmetrics >= 3.0.0',
         'zope.interface',
         'zope.dottedname',
