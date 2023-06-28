@@ -266,7 +266,7 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
         self.state_oid_tid_iterable = state_oid_tid_iterable
         self._iter = iter(state_oid_tid_iterable)
         self._digester = digester
-        if digester and bytes is not str:
+        if digester:
             # On Python 3, this outputs a str, but our protocol needs bytes
             self._digester = lambda s: digester(s).encode("ascii")
         if self._digester:
@@ -337,13 +337,29 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
     def __len__(self):
         return len(self.state_oid_tid_iterable)
 
+    def _next_row(self): # pylint:disable=method-hidden
+        return next(self._iter)
+
     def _read_one_tuple_md5(self,
                             buf,
                             _pack_into=WITH_SUM.pack_into,
                             _header_size=WITH_SUM.size,
                             _blank_header=bytearray(WITH_SUM.size)):
 
-        data, oid_int, tid_int = next(self._iter)
+        data, oid_int, tid_int = self._next_row()
+        if data is None:
+            # A deleted object. These should be quite rare relative
+            # to everything else. This won't have an MD5, so
+            # it can take the same code as the normal no-md5-path,
+            # as long as we arrange for it to get the right data.
+            # (A push-back iterator would simplify this.)
+            self._next_row = lambda: (data, oid_int, tid_int)
+            try:
+                self._read_one_tuple_no_md5(buf)
+            finally:
+                del self._next_row
+            return
+
         len_data = len(data)
         md5 = self._digester(data)
         offset = len(buf)
@@ -363,8 +379,8 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
                                _pack_into=NO_SUM.pack_into,
                                _header_size=NO_SUM.size,
                                _blank_header=bytearray(NO_SUM.size)):
-        data, oid_int, tid_int = next(self._iter)
-        len_data = len(data)
+        data, oid_int, tid_int = self._next_row()
+        len_data = len(data) if data is not None else -1
         offset = len(buf)
         buf.extend(_blank_header)
         _pack_into(
@@ -375,4 +391,4 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
             -1,
             len_data
         )
-        buf.extend(data)
+        buf.extend(data or b'')

@@ -1038,8 +1038,9 @@ class IPackUndo(Interface):
         is at *tid_int*), leading all access to *oid_int* in the
         future to throw ``POSKeyError``.
 
-        In history preserving databases, this means to set the state for the object
-        at the transaction to NULL, signifying that it's been deleted. A subsequent
+        In history preserving databases, this means that a new
+        revision of the object with a NULL state is created when the transaction is committed.
+        The NULL state signifies that it's been deleted. A subsequent
         pack operation is required to actually remove these deleted items.
         """
 

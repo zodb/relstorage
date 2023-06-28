@@ -12,8 +12,8 @@ import unittest
 class TestTemporaryStorage(unittest.TestCase):
 
     def _makeOne(self):
-        from ..temporary_storage import TemporaryStorage
-        return TemporaryStorage()
+        from ..temporary_storage import HPTPCTemporaryStorage
+        return HPTPCTemporaryStorage()
 
     def setUp(self):
         super().setUp()
@@ -25,7 +25,7 @@ class TestTemporaryStorage(unittest.TestCase):
         delattr(temporary_storage, 'id')
         super().tearDown()
 
-    _EMPTY_STR = '<TPCTemporaryStorage at 0xdeadbeef count=0 bytes=0>'
+    _EMPTY_STR = '<HPTPCTemporaryStorage at 0xdeadbeef count=0 bytes=0>'
 
     def test_empty_str(self):
         temp = self._makeOne()
@@ -54,13 +54,13 @@ class TestTemporaryStorage(unittest.TestCase):
         self.assertEqual(
             s,
             dedent("""\
-            <TPCTemporaryStorage at 0xdeadbeef count=3 bytes=15>
-            ====================================================
-            | OID            | Length         | Previous TID  |
-            ====================================================
-                          1  |              3 |              0
-                          2  |              3 |             42
-                       6547  |              9 |             23
+            <HPTPCTemporaryStorage at 0xdeadbeef count=3 bytes=15>
+            ======================================================
+            | OID             | Length          | Previous TID   |
+            ======================================================
+                           1  |               3 |               0
+                           2  |               3 |              42
+                        6547  |               9 |              23
             """
                    )
         )

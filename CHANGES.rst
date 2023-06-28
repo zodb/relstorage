@@ -19,6 +19,11 @@
   replaces the ``path`` query parameter.
 - Remove the (local) runtime (install) dependency on
   ``setuptools`` / ``pkg_resources``. This was undeclared.
+- History-preserving storage: Make deleting an object create a new
+  transaction with the new state set to NULL. This leaves the previous
+  revision of the object accessible. Previously, the most recent
+  revision of the object became unavailable. See :pr:`484`, with
+  thanks to Kirill Smelkov.
 
 3.5.0 (2022-09-16)
 ==================

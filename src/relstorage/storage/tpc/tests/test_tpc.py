@@ -230,23 +230,27 @@ class TestSharedTPCState(unittest.TestCase):
 
     def test_temp_storage(self):
         # pylint:disable=no-member
-        inst = self._makeOne()
+        from ..temporary_storage import HPTPCTemporaryStorage
+        class Storage:
+            keep_history = True
+        inst = self._makeOne(storage=Storage)
         self.assertFalse(inst.has_temp_data())
         self.assertNotIn('temp_storage', vars(inst))
 
         self.assertIs(inst.temp_storage, inst.temp_storage)
+        self.assertIsInstance(inst.temp_storage, HPTPCTemporaryStorage)
         self.assertIn('temp_storage', vars(inst))
         self.assertFalse(inst.has_temp_data())
         ts = inst.temp_storage
         inst.release()
-        self.assertIsNone(ts._queue)
+        self.assertIsNone(ts._buffer)
         self.assertIsNone(inst.temp_storage)
         self.assertFalse(inst.has_temp_data())
 
-        inst = self._makeOne()
+        inst = self._makeOne(storage=Storage)
         ts = inst.temp_storage
         inst.abort()
-        self.assertIsNone(ts._queue)
+        self.assertIsNone(ts._buffer)
         self.assertIsNone(inst.temp_storage)
         self.assertFalse(inst.has_temp_data())
 

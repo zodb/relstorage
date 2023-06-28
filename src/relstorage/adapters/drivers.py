@@ -210,7 +210,9 @@ class AbstractModuleDriver(object):
         # raise ProgrammingError for other things, such as failing to get a lock.
         self.illegal_operation_exceptions = (mod.ProgrammingError,)
         self.use_replica_exceptions = (mod.OperationalError,)
-        self.Binary = mod.Binary
+        # Binary must be able to handle None values to produce a None
+        # parameter; not all of them can do this out of the box.
+        self.Binary = lambda d, _Binary=mod.Binary: _Binary(d) if d is not None else None
         self._connect = mod.connect
         self.priority = self.PRIORITY if not PYPY else self.PRIORITY_PYPY
 

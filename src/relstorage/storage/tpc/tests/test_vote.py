@@ -182,6 +182,7 @@ class _TPCFinishMixin(object):
         def time():
             return finish_times.pop()
 
+        vote.shared_state._storage.keep_history = 'Preserving' in self.__class__.__name__
         vote.tpc_finish(vote.shared_state._storage, vote.transaction, _time=time)
 
         assert_that(self.stat_client,
@@ -200,7 +201,6 @@ class TestHistoryFree(_TPCFinishMixin, _InterfaceMixin, unittest.TestCase):
         return HistoryFree
 
 class TestHistoryPreserving(_TPCFinishMixin, _InterfaceMixin, unittest.TestCase):
-
     BeginState = MockLockedBeginState
 
     def _getClass(self):
@@ -208,7 +208,6 @@ class TestHistoryPreserving(_TPCFinishMixin, _InterfaceMixin, unittest.TestCase)
         return HistoryPreserving
 
 class TestHistoryPreservingDeleteOnly(_InterfaceMixin, unittest.TestCase):
-
     BeginState = MockLockedBeginState
 
     def _getClass(self):
@@ -216,7 +215,7 @@ class TestHistoryPreservingDeleteOnly(_InterfaceMixin, unittest.TestCase):
         return HistoryPreservingDeleteOnly
 
     def _check_lock_and_move_commit(self, committed):
-        self.assertFalse(committed)
+        self.assertTrue(committed)
 
 class TestFunctions(unittest.TestCase):
 
@@ -230,7 +229,9 @@ class TestFunctions(unittest.TestCase):
 
     def _check(self, kind):
         ex = kind('MESSAGE')
-        state = self._makeSharedState()
+        storage = MockStorage()
+        storage.keep_history = False # pylint:disable=attribute-defined-outside-init
+        state = self._makeSharedState(storage=storage)
         state.temp_storage.store_temp(1, b'abc', 42) # pylint:disable=no-member
 
         self._callFUT(ex, state, {1: 1})

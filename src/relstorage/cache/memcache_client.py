@@ -117,6 +117,8 @@ class MemcacheStateCache(object):
         send_size = 0
         to_send = {}
         for state, oid_int, _ in state_oid_iter:
+            if not state:
+                continue
             length = len(state)
             cachekey = (oid_int, tid_int)
             item_size = length + len(cachekey)

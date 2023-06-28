@@ -395,25 +395,31 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         return db, conn, obj_oid
 
     def checkImplementsIExternalGC(self):
+        # Note that, while FileStorage claims to provide IExternalGC,
+        # we cannot test it using ``conn._storage``, because that's wrapped in a
+        # ZODB mvccadapter which hides the ``deleteObject`` method.
+        # However, that aside, if we test with the real storage, all
+        # the parts that are implemented match our behaviour with its
+        # (the exception being it is not marked as invalidated by
+        # tpc_vote()).
         db, conn, obj_oid = self.__setup_checkImplementsIExternalGC()
 
         storage = conn._storage
         history = storage.history(obj_oid, size=100)
         self.assertEqual(6, len(history))
-        latest_tid = history[0]['tid']
-        # We can delete the latest TID for the OID, and the whole
+        tid_to_delete = history[0]['tid']
+        size_at_deletion = history[0]['size']
+
+        # We can record deletion for the OID, and the whole
         # object goes away on a pack.
         t = TransactionMetaData()
         storage.tpc_begin(t)
-        count = storage.deleteObject(obj_oid, latest_tid, t)
-        self.assertEqual(count, 1)
-        # Doing it again will do nothing because it's already
-        # gone.
-        count = storage.deleteObject(obj_oid, latest_tid, t)
+        storage.deleteObject(obj_oid, tid_to_delete, t)
         invalidations = storage.tpc_vote(t)
         storage.tpc_finish(t)
 
         # It is detected as invalidated during voting
+        # (FileStorage does not do this, it returns [])
         self.assertEqual([obj_oid], list(invalidations))
 
         # And not at the next poll.
@@ -424,7 +430,10 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         with self.assertRaises(POSKeyError):
             storage.load(obj_oid)
 
-        # But we can load a state before then.
+        # But we can load states before then, including
+        # the state at the time we deleted it.
+        state = storage.loadSerial(obj_oid, tid_to_delete)
+        self.assertEqual(len(state), size_at_deletion)
         state = storage.loadSerial(obj_oid, history[1]['tid'])
         self.assertEqual(len(state), history[1]['size'])
 

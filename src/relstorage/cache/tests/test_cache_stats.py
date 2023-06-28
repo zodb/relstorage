@@ -30,7 +30,8 @@ import random2
 from relstorage.cache.storage_cache import StorageCache
 
 from relstorage.cache.tests import MockOptions, MockAdapter
-from relstorage.storage.tpc.temporary_storage import TemporaryStorage
+
+from ...storage.tpc.temporary_storage import HFTPCTemporaryStorage as TemporaryStorage
 
 def _build_history():
     random = random2.Random(42)

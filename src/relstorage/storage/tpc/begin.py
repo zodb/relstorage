@@ -177,7 +177,7 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
 
     def deleteObject(self, oid, oldserial, transaction):
         """
-        This method operates directly against the ``object_state`` table;
+        In history-free mode, this method operates directly against the ``object_state`` table;
         as such, it immediately takes out locks on that table.
 
         This method is only expected to be called when performing
@@ -214,6 +214,7 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
         tid_int = bytes8_to_int64(oldserial)
         self.shared_state.cache.remove_cached_data(oid_int, tid_int)
 
+        self.shared_state.temp_storage.delete_object(oid_int, tid_int)
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
         cursor = self.shared_state.store_connection.cursor

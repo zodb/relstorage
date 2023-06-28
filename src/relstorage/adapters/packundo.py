@@ -286,6 +286,24 @@ class PackUndo(DatabaseHelpersMixin):
         )
         assert num_rows_sent_to_db == marker.reachable_count
 
+    __check_refs_script = """
+    SELECT zoid, to_zoid
+    FROM pack_object
+    INNER JOIN object_ref USING (zoid)
+    WHERE keep = %(TRUE)s
+    AND NOT EXISTS (
+        SELECT 1
+        FROM object_state
+        WHERE object_state.zoid = to_zoid
+        AND object_state.state IS NOT NULL
+        AND object_state.tid = (
+            SELECT MAX(tid)
+            FROM object_state
+            WHERE object_state.zoid = object_ref.to_zoid
+        )
+    )
+    """
+
     def check_refs(self, pack_tid):
         """
         Are there any objects we're *not* going to garbage collect that
@@ -303,18 +321,7 @@ class PackUndo(DatabaseHelpersMixin):
         try:
             with _Progress('execute') as progress:
                 with self._make_ss_load_cursor(load_connection) as ss_load_cursor:
-                    stmt = """
-                    SELECT zoid, to_zoid
-                    FROM pack_object
-                    INNER JOIN object_ref USING (zoid)
-                    WHERE keep = %(TRUE)s
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM object_state
-                        WHERE object_state.zoid = to_zoid
-                        AND object_state.state IS NOT NULL
-                    )
-                    """
+                    stmt = self.__check_refs_script
                     self.runner.run_script_stmt(ss_load_cursor, stmt)
                     progress.mark('download')
 
@@ -476,10 +483,8 @@ class HistoryPreservingPackUndo(PackUndo):
     )
 
     _script_delete_object = """
-    UPDATE object_state
-    SET state = NULL,
-        state_size = 0,
-        md5 = ''
+    SELECT 1
+    FROM object_state
     WHERE zoid = %(oid)s
     AND    tid = %(tid)s
     """

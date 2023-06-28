@@ -43,7 +43,8 @@ from ...adapters.connections import ClosedConnection
 from ..._util import Lazy as BaseLazy
 from ..._util import get_boolean_from_environ
 
-from .temporary_storage import TemporaryStorage
+from .temporary_storage import HPTPCTemporaryStorage
+from .temporary_storage import HFTPCTemporaryStorage
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,10 @@ LOCK_EARLY = get_boolean_from_environ(
 # pylint:disable=protected-access
 
 class _LazyResource(BaseLazy):
+    """
+    A Lazy property that supports resource management of the
+    returned value.
+    """
 
     # If not None, a callable ``(storage, resource, force)``
     # that aborts the *resource*, possibly forcefully (*force*).
@@ -209,7 +214,8 @@ class SharedTPCState(object):
 
     @_LazyResource
     def temp_storage(self):
-        return TemporaryStorage()
+        factory = HPTPCTemporaryStorage if self._storage.keep_history else HFTPCTemporaryStorage
+        return factory()
 
     @temp_storage.cleaner
     def temp_storage(self, _storage, temp_storage, _force=None):

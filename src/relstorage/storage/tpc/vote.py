@@ -631,30 +631,24 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     __slots__ = ()
 
     def _vote(self, storage):
-        if self.shared_state.temp_storage and self.shared_state.temp_storage.stored_oids:
+        temp_store = self.shared_state.temp_storage
+        if (temp_store # We have tried to store something in the past
+            and temp_store.stored_oids # it's still there
+            and temp_store.has_deleted_and_active_objects()
+        ):
             raise StorageTransactionError("Cannot store and delete at the same time.")
         # We only get here if we've deleted objects, meaning we hold their row locks.
         # We only delete objects once we hold the commit lock.
         assert self.committing_tid_lock
-        # Holding the commit lock put an entry in the transaction table,
-        # but we don't want to bump the TID or store that data.
-        self.shared_state.adapter.txncontrol.delete_transaction(
-            self.shared_state.store_connection.cursor,
-            self.committing_tid_lock.tid_int
-        )
-        self.lock_and_vote_times[0] = time.time()
-        return ()
-
-    def _lock_and_move(self, vote_only=False):
-        # We don't do the final commit,
-        # we just prepare.
-        self._enter_critical_phase_until_transaction_end()
-        self.shared_state.prepared_txn = self.shared_state.adapter.txncontrol.commit_phase1(
-            self.shared_state.store_connection,
-            self.committing_tid_lock.tid_int
-        )
-        return False
-
+        # In the past, when we did not store whiteout objects for
+        # deletions, we just set the state directly to NULL,
+        # we needed to delete the transaction we have already created, so
+        # we did that here (and didn't call super()). But
+        # now that we store whiteout objects, they need their own transaction.
+        # Likewise, _lock_and_move used to be defined here to override the
+        # super() version and commit phase1 (prepare), but with whiteout
+        # objects we now need the full lifecycle, so that's not needed anymore.
+        return super()._vote(storage)
 
 class _CachedConflictResolver(ConflictResolvingStorage):
 

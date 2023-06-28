@@ -264,6 +264,10 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
         Uses the cursor's ``executemany`` method to store temporary
         objects.
 
+        :param state_oid_tid_iter: An iterable over
+          tuples ``(state, oid_int, tid_int)``. Data may be None
+          to indicate we should store a NULL.
+
         If there is a more optimal way to implement putting objects in
         the database, please do so.
 

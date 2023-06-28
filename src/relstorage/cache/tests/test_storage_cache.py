@@ -24,7 +24,7 @@ from hamcrest import assert_that
 from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
-from relstorage.storage.tpc.temporary_storage import TemporaryStorage
+from ...storage.tpc.temporary_storage import HFTPCTemporaryStorage as TemporaryStorage
 
 from ..interfaces import IStorageCache
 from . import MockOptionsWithFakeMemcache as MockOptionsWithFakeCache
@@ -248,7 +248,7 @@ class StorageCacheTests(TestCase):
         self.assertEqual(dict(temp_storage.stored_oids),
                          {1: (3, 6, 0), 2: (6, 9, 0)})
         self.assertEqual(temp_storage.max_stored_oid, 2)
-        f = temp_storage._queue
+        f = temp_storage._buffer
         f.seek(0)
         self.assertEqual(f.read(), b'abcdefghi')
         c.after_tpc_finish(p64(3), temp_storage)
