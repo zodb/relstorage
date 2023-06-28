@@ -98,7 +98,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     rm -rf wheelhouse
     mkdir wheelhouse
 
-    for variant in `ls -d /opt/python/cp{37,38,39,310,311}*`; do
+    for variant in `ls -d /opt/python/cp{38,39,310,311}*`; do
         # XXX: Cython 3.0b3 doesn't compile correctly on Python 3.12; the long object
         # has changed.
         echo "Building $variant"

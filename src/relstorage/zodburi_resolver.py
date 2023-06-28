@@ -121,14 +121,18 @@ class OracleAdapterHelper(Resolver):
         return factory, unused
 
 class SqliteAdapterHelper(Resolver):
-    _string_args = ('path',)
+    """
+    .. versionchanged:: NEXT
+        The ``data_dir`` argument replaces the ``path`` argument.
+    """
+    _string_args = ('data_dir',)
 
     def __call__(self, parsed_uri, kw):
         kw, unused = self.interpret_kwargs(kw)
 
         def factory(options):
             from relstorage.adapters.sqlite.adapter import Sqlite3Adapter
-            return Sqlite3Adapter(options=options, **kw)
+            return Sqlite3Adapter(options=options, pragmas={}, **kw)
         return factory, unused
 
 # The relstorage support is inspired by django-zodb.

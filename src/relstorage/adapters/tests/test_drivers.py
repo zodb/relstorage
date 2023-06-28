@@ -19,6 +19,7 @@ from __future__ import print_function
 
 
 import unittest
+from unittest.mock import patch as Patch
 
 from zope.interface import implementer
 
@@ -133,3 +134,58 @@ class IDBDriverSupportsCriticalTestMixin(object):
         driver.enter_critical_phase_until_transaction_end(conn, None)
         conn.rollback()
         self.assertFalse(driver.is_in_critical_phase(conn, None))
+
+
+class TestAbstractModuleDriver(unittest.TestCase):
+
+    def test_requirements(self):
+        import zope.interface
+        from packaging.version import InvalidVersion
+        from .. import drivers
+
+
+        class Driver(drivers.AbstractModuleDriver):
+            __name__ = 'Testing'
+            MODULE_NAME = 'zope.interface'
+            REQUIREMENTS = (
+                # Guaranteed to have this. We didn't put a version
+                # on it, so it will always work.
+                MODULE_NAME,
+            )
+
+        d = Driver.__new__(Driver)
+        mod = d._check_preconditions()
+        self.assertIs(mod, zope.interface)
+
+        # Multiple
+        d.REQUIREMENTS = (
+            'zope.interface > 1, != 2',
+            'ZODB'
+        )
+        mod = d._check_preconditions()
+        self.assertIs(mod, zope.interface)
+
+        # Version mismatch
+        d.REQUIREMENTS = (
+            'ZODB == 1',
+        )
+        with self.assertRaisesRegex(
+            drivers.DriverNotAvailableError,
+            "DriverNotAvailableError: Driver 'Testing' is not available "
+            r"\(reason=Requirement ZODB==1 not met with package:"
+        ):
+            d._check_preconditions()
+
+        # Not installed
+        d.REQUIREMENTS = ( 'relstorage.this.is.not.a.distro',)
+        with self.assertRaisesRegex(
+            drivers.DriverNotAvailableError,
+            'package metadata'
+        ):
+            d._check_preconditions()
+
+        # Fake in unparseable version
+        d.REQUIREMENTS = ('ZODB',)
+        with Patch.object(drivers, 'parse_version', side_effect=InvalidVersion):
+            with self.assertRaisesRegex(drivers.DriverNotAvailableError, "InvalidVersion"):
+                d._check_preconditions()

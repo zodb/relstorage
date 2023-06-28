@@ -6,15 +6,19 @@
 ==================
 
 - Drop support for Python versions that are end of life, including
-  everything less than 3.7.
+  everything less than 3.8.
 - Add the "Requires Python" metadata to prevent installation on Python
-  < 3.7.
+  < 3.8.
 - Add support for Python 3.11.
 - Bump tested database drivers to their latest versions, with the
   exception of ``mysql-connector-python``; this driver is only tested
   at version 8.0.31 as there are known incompatibilities with 8.0.32
   (which is currently the latest version).
-
+- pg8000: Require 1.29.0. See :issue:`495`.
+- Fix the SQLite ZODB URI resolver. The ``data_dir`` query parameter
+  replaces the ``path`` query parameter.
+- Remove the (local) runtime (install) dependency on
+  ``setuptools`` / ``pkg_resources``. This was undeclared.
 
 3.5.0 (2022-09-16)
 ==================

@@ -187,7 +187,9 @@ class TestSQLiteURIResolver(AbstractURIResolverTestBase):
 
     def _format_db(self, dbname='somedb', user='someuser', password='somepass',
                    host='somehost', port='5432', **kwargs):
-        return {}
+        return {
+            'pragmas': {},
+        }
 
 
 del AbstractURIResolverTestBase # So it doesn't get discovered as a test
@@ -195,11 +197,28 @@ del AbstractURIResolverTestBase # So it doesn't get discovered as a test
 class TestEntryPoints(unittest.TestCase):
 
     def _check_entry_point(self, name, cls, helper_cls):
-        from pkg_resources import load_entry_point
+        import sys
+        from importlib.metadata import entry_points
 
-        target = load_entry_point('relstorage', 'zodburi.resolvers', name)
+        if sys.version_info[:2] >= (3, 10):
+            # pylint:disable-next=unexpected-keyword-arg
+            entry_point, = entry_points(group="zodburi.resolvers",
+                                        module="relstorage.zodburi_resolver",
+                                        name=name,)
+        else:
+            # Prior to 3.10, we have to do this all manually.
+            ep_dict = entry_points()
+            entry_point, = (
+                ep
+                for ep
+                in ep_dict['zodburi.resolvers']
+                if ep.name == name and ep.module == 'relstorage.zodburi_resolver'
+            )
+
+        target = entry_point.load()
         self.assertIsInstance(target, cls)
         self.assertIsInstance(target.adapter_helper, helper_cls)
+        return target
 
     def test_postgres(self):
         from relstorage.zodburi_resolver import PostgreSQLAdapterHelper
@@ -214,5 +233,17 @@ class TestEntryPoints(unittest.TestCase):
         self._check_entry_point('oracle', RelStorageURIResolver, OracleAdapterHelper)
 
     def test_sqlite(self):
+        import tempfile
+        from relstorage.interfaces import IRelStorage
+        from relstorage.adapters.interfaces import IRelStorageAdapter
         from relstorage.zodburi_resolver import SqliteAdapterHelper
-        self._check_entry_point('sqlite', RelStorageURIResolver, SqliteAdapterHelper)
+        resolver = self._check_entry_point('sqlite', RelStorageURIResolver, SqliteAdapterHelper)
+
+        with tempfile.TemporaryDirectory(suffix='.test_sqlite') as td:
+            factory, _ = resolver('sqlite://?data_dir=' + td)
+
+        storage = factory()
+
+        self.assertTrue(IRelStorage.providedBy(storage))
+        # pylint:disable-next=no-value-for-parameter,protected-access
+        self.assertTrue(IRelStorageAdapter.providedBy(storage._adapter))

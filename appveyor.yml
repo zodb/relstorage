@@ -72,12 +72,6 @@ environment:
       PYTHON_EXE: python
       APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
 
-    - PYTHON: "C:\\Python37-x64"
-      PYTHON_VERSION: "3.7.x"
-      PYTHON_ARCH: "64"
-      PYTHON_EXE: python
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
-
     ## 32-bit, wheel only (no testing)
 
     - PYTHON: "C:\\Python38"
@@ -86,11 +80,6 @@ environment:
       PYTHON_EXE: python
       GWHEEL_ONLY: true
 
-    - PYTHON: "C:\\Python37"
-      PYTHON_VERSION: "3.7.x"
-      PYTHON_ARCH: "32"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
 
 services:
   - mysql

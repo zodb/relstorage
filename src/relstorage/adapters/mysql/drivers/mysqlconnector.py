@@ -43,6 +43,10 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     MODULE_NAME = 'mysql.connector'
     PRIORITY = 4
     PRIORITY_PYPY = 2
+    REQUIREMENTS = (
+        'mysql-connector-python == 8.0.31',
+    )
+
 
     USE_PURE = True
 

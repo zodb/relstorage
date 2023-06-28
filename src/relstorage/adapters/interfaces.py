@@ -248,7 +248,8 @@ class DriverNotAvailableError(Exception):
     driver_options = None
 
     #: The underlying reason string, for example, from an import error
-    #: if such is available.
+    #: if such is available. This can be an arbitrary object; if it
+    #: is not None, its ``str()`` value is included in our own.
     reason = None
 
     def __init__(self, driver_name, driver_options=None, reason=None):
@@ -278,7 +279,7 @@ class DriverNotAvailableError(Exception):
         return ' Options: %s.' % (formatted,)
 
     def __str__(self):
-        if self.reason:
+        if self.reason is not None:
             reason = ' (reason=%s)' % (self.reason,)
         else:
             reason = ''

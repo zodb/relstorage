@@ -62,7 +62,10 @@ class PG8000Dialect(PostgreSQLDialect):
 @implementer(IDBDriver)
 class PG8000Driver(AbstractPostgreSQLDriver):
     __name__ = 'pg8000'
-    MODULE_NAME = __name__
+    MODULE_NAME = __name__ # The thing to import
+    REQUIREMENTS = (
+        'pg8000 >= 1.29.0',
+    )
     PRIORITY = 3
     PRIORITY_PYPY = 2
 

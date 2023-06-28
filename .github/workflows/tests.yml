@@ -87,14 +87,12 @@ jobs:
       matrix:
         # XXX: PyPy 3.9 is failing to build zope.interface 6.0!
         # Need to take this up with the zope.interface repo.
-        python-version: [3.7, 3.8, 3.9, '3.10', '3.11']
+        python-version: [3.8, 3.9, '3.10', '3.11']
         os: [ubuntu-latest, macos-latest]
         exclude:
           - os: macos-latest
             python-version: pypy-3.9
-          # Get an error importing _bz2 on macos/3.7
-          - os: macos-latest
-            python-version: 3.7
+
     steps:
       - name: checkout
         uses: actions/checkout@v3

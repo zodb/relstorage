@@ -19,6 +19,12 @@ from __future__ import print_function
 
 import importlib
 import sys
+from importlib import metadata
+
+from packaging.version import parse as parse_version
+from packaging.version import InvalidVersion
+from packaging.requirements import Requirement
+
 
 from zope.interface import directlyProvides
 from zope.interface import implementer
@@ -73,6 +79,49 @@ class DriverNotImportableError(DriverNotAvailableError,
                                ImportError):
     "When the module can't be imported."
 
+
+class _FalseReason:
+    def __init__(self, exc):
+        if isinstance(exc, str):
+            self.message = exc
+        else:
+            self.message = "%s: %s" % (type(exc).__name__, exc)
+
+    def __bool__(self):
+        return False
+
+    def __str__(self):
+        return self.message
+
+
+def _has_requirement(requirement):
+    # A requirement is a named distribution (the thing you install
+    # from PyPI) and (an optional but important for this use)
+    # a version specifier. This specifier lets you
+    # specify ranges and exclusions.
+    #
+    # This, this checks that a distribution of the correct version
+    # is installed.
+    #
+    # *requirement* is a ``packaging.requirements.Requirement`` object.
+    dist_name = requirement.name
+    try:
+        installed_ver_str = metadata.version(dist_name)
+    except ImportError as ex:
+        return _FalseReason(ex)
+
+    try:
+        installed_ver = parse_version(installed_ver_str)
+    except InvalidVersion as ex:
+        return _FalseReason(ex)
+
+    if installed_ver not in requirement.specifier:
+        return _FalseReason('Requirement %s not met with package: %s' % (
+            requirement, installed_ver
+        ))
+    return True
+
+
 class AbstractModuleDriver(object):
     """
     Base implementation of a driver, based on a module, as used in DBAPI.
@@ -95,10 +144,20 @@ class AbstractModuleDriver(object):
     #: Can this module be used on PyPy?
     AVAILABLE_ON_PYPY = True
 
-    #: Set this to false if your subclass can do static checks
+    #: Set this to a false value if your subclass can do static checks
     #: at import time to determine it should not be used.
     #: Helpful for things like Python version detection.
     STATIC_AVAILABLE = True
+
+    #: Set this to a sequence of strings of requirements ``("pg8000 >= 1.29",)``
+    #: Creating an instance will validate that the requirements
+    #: are met (packages with correct versions are installed).
+    #:
+    #: Do this only when a requirement cannot be specified in
+    #: setup.py as an installation requirement.
+    #:
+    #: .. versionadded:: NEXT
+    REQUIREMENTS = ()
 
     #: Priority of this driver, when available. Lower is better.
     #: (That is, first choice should have value 1, and second choice value
@@ -139,20 +198,7 @@ class AbstractModuleDriver(object):
     supports_64bit_unsigned_id = True
 
     def __init__(self):
-        if PYPY and not self.AVAILABLE_ON_PYPY:
-            raise self.DriverNotAvailableError(self.__name__)
-        if not self.STATIC_AVAILABLE:
-            raise self.DriverNotAvailableError(self.__name__)
-        try:
-            self.driver_module = mod = self.get_driver_module()
-        except ImportError as ex:
-            logger.debug(
-                "Attempting to load driver named %r from %r failed; if no driver was specified, "
-                "or the driver was set to 'auto', there may be more drivers to attempt.",
-                self.__name__, self.MODULE_NAME,
-                exc_info=True)
-            raise DriverNotImportableError(self.__name__, reason=str(ex)) from ex
-
+        self.driver_module = mod = self._check_preconditions()
 
         self.disconnected_exceptions = (mod.OperationalError,
                                         mod.InterfaceError,
@@ -167,6 +213,32 @@ class AbstractModuleDriver(object):
         self.Binary = mod.Binary
         self._connect = mod.connect
         self.priority = self.PRIORITY if not PYPY else self.PRIORITY_PYPY
+
+    def _check_preconditions(self):
+        if PYPY and not self.AVAILABLE_ON_PYPY:
+            raise self.DriverNotAvailableError(self.__name__, reason="Not available on PyPy")
+        if not self.STATIC_AVAILABLE:
+            raise self.DriverNotAvailableError(self.__name__, reason=self.STATIC_AVAILABLE)
+
+        # Check that it can be imported. Cannnot do this with
+        # a Requirement because the distro name may not match the importable name.
+        try:
+            mod = self.get_driver_module()
+        except ImportError as ex:
+            logger.debug(
+                "Attempting to load driver named %r from %r failed; if no driver was specified, "
+                "or the driver was set to 'auto', there may be more drivers to attempt.",
+                self.__name__, self.MODULE_NAME,
+                exc_info=True)
+            raise DriverNotImportableError(self.__name__, reason=str(ex)) from ex
+
+        # It can be imported. Verify versions.
+        for req in self.REQUIREMENTS:
+            has_it = _has_requirement(Requirement(req))
+            if not has_it:
+                raise self.DriverNotAvailableError(self.__name__, reason=has_it)
+        return mod
+
 
     def connect(self, *args, **kwargs):
         return self._connect(*args, **kwargs)

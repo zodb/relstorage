@@ -41,7 +41,7 @@ except ImportError:
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
     file_path = (base_dir, ) + tuple(path)
-    with open(os.path.join(*file_path)) as f:
+    with open(os.path.join(*file_path), 'rt', encoding='utf-8') as f:
         result = f.read()
     return result
 
@@ -101,13 +101,13 @@ setup(
     license="ZPL 2.1",
     platforms=["any"],
     description="A backend for ZODB that stores pickles in a relational database.",
-    python_requires=">=3.7",
+    # 3.8: importlib.metadata
+    python_requires=">=3.8",
     classifiers=[
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Zope Public License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -271,11 +271,13 @@ setup(
             'mysqlclient >= 2.0.0',
             # mysql-connector-python; one of two pure-python versions
             # XXX: >= 8.0.32 has issues with binary values!
+            # This requirement is repeated in the driver class.
             'mysql-connector-python == 8.0.31; python_version == "3.10"',
 
             # postgresql
             # pure-python
             # pg8000
+            # This requirement is repeated in the driver class.
             'pg8000 >= 1.29.0; python_version == "3.11"',
             # CFFI, runs on all implementations.
             'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
