@@ -180,7 +180,7 @@ class TestAbstractModuleDriver(unittest.TestCase):
         d.REQUIREMENTS = ( 'relstorage.this.is.not.a.distro',)
         with self.assertRaisesRegex(
             drivers.DriverNotAvailableError,
-            'package metadata'
+            'PackageNotFoundError'
         ):
             d._check_preconditions()
 

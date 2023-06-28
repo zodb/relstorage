@@ -211,7 +211,10 @@ class TestEntryPoints(unittest.TestCase):
             # so we have to look at the entire ``.value``.
             #
             ep_dict = entry_points()
-            entry_point, = (
+            __traceback_info__ = ep_dict
+            # On Python 3.8, we can get duplicate EntryPoint objects; it is unclear
+            # why. Drop them into a set to make sure we only get one.
+            entry_point, = set(
                 ep
                 for ep
                 in ep_dict['zodburi.resolvers']
