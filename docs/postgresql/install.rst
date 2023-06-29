@@ -5,10 +5,8 @@
 .. tip:: See :doc:`../install` for the easiest way to get the best
          drivers.
 
-On CPython2, install psycopg2 2.8+. pg8000 is also tested to work.
 
 For CPython3, install psycopg2. pg8000 is also tested to work.
-
 
 On PyPy, install psycopg2cffi 2.8+ (PyPy will generally work with
 psycopg2 but it will be *much* slower; in contrast, pg8000 performs
@@ -23,11 +21,6 @@ bold** are the recommended adapter installed with the extra.
    +----------+---------------------+
    | Platform |   PostgreSQL        |
    +==========+=====================+
-   | CPython2 |  1. **psycopg2**    |
-   |          |  2. pg8000          |
-   |          |                     |
-   |          |                     |
-   +----------+---------------------+
    | CPython3 |  1. **psycopg2**    |
    |          |  2. pg8000          |
    |          |                     |

@@ -11,15 +11,15 @@
 .. note:: mysqlclient 1.4 is not available on Windows for Python 2.
           PyMySQL is tested instead.
 
-On CPython2, mysqlclient 1.4+. PyMySQL 0.7+ and MySQL
-Connector/Python 8.0.16 up through 8.0.23 are also tested to work.
 
 For CPython3, install mysqlclient 1.4+; PyMySQL, and MySQL
-Connector/Python are also known to work.
+Connector/Python are also known to work (but MySQL Connector/Python is
+not recommended).
 
 On PyPy, install PyMySQL 0.6.6+ (PyPy will generally work with
 mysqlclient, but it will be *much* slower). MySQL Connector/Python is
-tested to work on PyPy 7.1.
+tested to work on PyPy 7.1 (but MySQL Connector/Python is
+not recommended)
 
 Here's a table of known (tested) working adapters; adapters **in
 bold** are the recommended adapter installed with the extra.
@@ -30,11 +30,6 @@ bold** are the recommended adapter installed with the extra.
    +----------+---------------------+
    | Platform |  MySQL              |
    +==========+=====================+
-   | CPython2 | 1. **mysqlclient**  |
-   |          | 2. PyMySQL          |
-   |          | 3. MySQL Connector  |
-   |          |                     |
-   +----------+---------------------+
    | CPython3 | 1. **mysqlclient**  |
    |          | 2. PyMySQL          |
    |          | 3. MySQL Connector  |

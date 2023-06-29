@@ -26,9 +26,9 @@ only the dsn ::
 
   oracle://?dsn="HERE GOES THE DSN"
 
-Likewise, SQLite only needs the file path::
+Likewise, SQLite only needs the path to the directory to hold the files::
 
-  sqlite://?path=/the/path/to/database.sqlite3
+  sqlite://?data_dir=/the/path/to/database
 
 Query String Arguments
 ======================

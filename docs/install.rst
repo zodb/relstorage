@@ -2,8 +2,8 @@
  Installation
 ==============
 
-RelStorage 3.0 is supported on Python 3.7,
-through 3.11, as well as PyPy3 3.9 or later.
+RelStorage 3.0 is supported on Python 3.8, through 3.11, as well as
+PyPy3 3.9 or later.
 
 .. seealso:: :doc:`supported-databases`
 
@@ -18,7 +18,8 @@ platform, you will need to have a functioning C/C++ compiler and the
 ability to compile `Cython extensions
 <https://cython.readthedocs.io/>`_.
 
-RelStorage requires ZODB 5. To use ZODB and ZEO 4 (which
+RelStorage requires ZODB 5. The latest RelStorage version to support
+Python 2.7 is Relstorage 3. To use ZODB and ZEO 4 (which
 supports Python 2.7.8 and earlier), install RelStorage 2.1. If you
 need to use even older versions of ZODB/ZEO, install RelStorage 1.6.
 Likewise, if you need Python 2.6 support, install RelStorage 1.6 (note

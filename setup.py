@@ -260,6 +260,7 @@ setup(
             'repoze.sphinx.autointerface',
             'sphinx_rtd_theme',
             'ZEO',
+            'furo',
         ],
         'all_tested_drivers': [
             # Install all the supported drivers for the platform.
