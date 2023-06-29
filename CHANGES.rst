@@ -10,6 +10,8 @@
 - Add the "Requires Python" metadata to prevent installation on Python
   < 3.8.
 - Add support for Python 3.11.
+- Add preliminary support for Python 3.12. This is using a pre-release
+  version of Cython 3.
 - Bump tested database drivers to their latest versions. In
   particular, the ``mysql-connector-python`` supported version is now
   8.0.32, which introduces charset changes.

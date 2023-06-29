@@ -51,7 +51,9 @@ WINDOWS = sys.platform.startswith("win")
 PY3 = sys.version_info[0] == 3
 
 memcache_require = [
-    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
+    # Couldn't get this building on 3.12b3;
+    # It's deprecated though.
+    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32" and python_version < "3.12"',
     'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
 ]
 
@@ -112,8 +114,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        # 3.12 pending Cython updates.
-        #"Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Database",

@@ -2,7 +2,7 @@
 # Initially based on a snippet from the greenlet project.
 # This needs to be run from the root of the project.
 # To update: docker pull quay.io/pypa/manylinux2010_x86_64
-set -e
+set -evo pipefail
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -38,7 +38,7 @@ export CCACHE_DIR="/ccache"
 
 # Disable some warnings produced by libev especially and also some Cython generated code.
 # Note that changing the value of these variables invalidates configure caches
-
+SLOW_BUILD=''
 GEVENT_WARNFLAGS="-Wno-strict-aliasing -Wno-comment -Wno-unused-value -Wno-unused-but-set-variable -Wno-sign-compare -Wno-parentheses -Wno-unused-function -Wno-tautological-compare -Wno-strict-prototypes -Wno-return-type -Wno-misleading-indentation"
 OPTIMIZATION_FLAGS="-pipe"
 if [ -n "$GITHUB_ACTIONS" ]; then
@@ -97,17 +97,15 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     cd /RelStorage
     rm -rf wheelhouse
     mkdir wheelhouse
-
-    for variant in `ls -d /opt/python/cp{38,39,310,311}*`; do
-        # XXX: Cython 3.0b3 doesn't compile correctly on Python 3.12; the long object
-        # has changed.
+    ls -l /opt/python
+    for variant in `ls -d /opt/python/cp{312,38,39,310,311}*`; do
         echo "Building $variant"
         mkdir /tmp/build
         cd /tmp/build
         git clone /RelStorage RelStorage
         cd RelStorage
         $variant/bin/pip install -U pip
-        $variant/bin/pip install -U 'cython>=3.0b3' setuptools
+        #$variant/bin/pip install -U 'cython>=3.0b3' setuptools
         PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
         auditwheel show dist/RelStorage*.whl
         auditwheel repair dist/RelStorage*.whl
@@ -133,5 +131,5 @@ if [ ! -d $HOME/.ccache ]; then
     mkdir $HOME/.ccache
 fi
 
-docker run --rm -e GITHUB_ACTIONS -e DOCKER_IMAGE -v "$(pwd):/RelStorage" -v "$LCACHE:/cache" -v "$HOME/.ccache:/ccache" ${DOCKER_IMAGE:-quay.io/pypa/manylinux2010_x86_64} /RelStorage/scripts/releases/$(basename $0)
+docker run --rm -e GITHUB_ACTIONS -e DOCKER_IMAGE -v "$(pwd):/RelStorage" -v "$LCACHE:/cache" -v "$HOME/.ccache:/ccache" ${DOCKER_IMAGE:-quay.io/pypa/manylinux2014_aarch64} /RelStorage/scripts/releases/$(basename $0)
 ls -l wheelhouse
