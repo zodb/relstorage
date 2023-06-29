@@ -22,7 +22,7 @@ from zope.testrunner import run
 
 sys.argv[:] = [
     'zope-testrunner',
-    '--path', 'src',
+    '--test-path', 'src',
     '-v',
     '--color',
     '--keepbytecode',
