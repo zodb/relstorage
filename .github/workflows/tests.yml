@@ -139,7 +139,8 @@ jobs:
         if: ${{ ! startsWith(runner.os, 'Mac') }}
         run: |
           python setup.py bdist_wheel
-          python -m pip install -U -e ".[test,docs,all_tested_drivers]"
+          WHL=$(ls dist/*whl)
+          python -m pip install -U  "$WHL[test,docs,all_tested_drivers]"
         env:
           # Ensure we test with assertions enabled.
           # As opposed to the manylinux builds, which we distribute and
@@ -152,7 +153,8 @@ jobs:
         if: startsWith(runner.os, 'Mac')
         run: |
           python setup.py bdist_wheel
-          python -m pip install -U -e ".[test,docs,all_tested_drivers]"
+          WHL=$(ls dist/*whl)
+          python -m pip install -U "$WHL[test,docs,all_tested_drivers]"
         env:
           # Unlike the above, we are actually distributing these
           # wheels, so they need to be built for production use.
