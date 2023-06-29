@@ -92,6 +92,12 @@ jobs:
         exclude:
           - os: macos-latest
             python-version: pypy-3.9
+          # Can't build persistent on 3.12 with -UNDEBUG because it
+          # accesses fields of objects that aren't there in assert statements;
+          # we build linux with assertions enabled, and there is no 3.12
+          # persistent wheel yet, so we have to exclude that one.
+          - os: ubuntu-latest
+            python-version: "3.12-dev"
 
     steps:
       - name: checkout
