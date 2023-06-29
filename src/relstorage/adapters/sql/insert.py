@@ -10,6 +10,7 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from .query import Query
+from .query import Clause
 from ._util import copy
 from .query import ColumnList
 from .ast import resolved_against
@@ -20,12 +21,34 @@ from .query import WhereMixin
 from .expressions import AssignmentExpression
 from .expressions import EmptyExpression
 from .expressions import Expression
+from .expressions import ParamMixin
+from .dialect import DialectAware
 
 # pylint objects to __compile_visit.*__
 # pylint:disable=bad-dunder-name
 
 class _ValuesPlaceholderList(ColumnList):
     pass
+
+class _InsertValuesClause(ParamMixin, Clause):
+
+    def __init__(self, column_list):
+        self.column_list = column_list
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_keyword('VALUES')
+        values = ()
+        if self.column_list:
+            values = _ValuesPlaceholderList([self.orderedbindparam()
+                                             for _ in self.column_list])
+            compiler.visit_grouped(values)
+        else:
+            compiler.visit_no_values()
+
+    def __compile_visit_for_upsert__(self, compiler):
+        self.__compile_visit__(compiler)
+        compiler.visit_upsert_values(self)
+
 
 @implementer(ITypedParams)
 class Insert(Query):
@@ -62,13 +85,9 @@ class Insert(Query):
         if self.select:
             self._visit_select(compiler)
         else:
-            compiler.emit_keyword('VALUES')
-            if self.column_list:
-                values = _ValuesPlaceholderList([self.orderedbindparam()
-                                                 for _ in self.column_list])
-                compiler.visit_grouped(values)
-            else:
-                compiler.visit_no_values()
+            values = _InsertValuesClause(self.column_list)
+            values = values.bind(self.context)
+            compiler.visit(values)
         compiler.emit(self.epilogue)
 
     def datatypes_for_parameters(self):
@@ -94,6 +113,7 @@ class Insert(Query):
             return dialect.datatypes_for_columns(columns_with_params)
         return None
 
+
 class _ExcludedColumn(Expression):
 
     def __init__(self, name):
@@ -104,6 +124,26 @@ class _ExcludedColumn(Expression):
 
     def __compile_visit_for_upsert__(self, compiler):
         compiler.visit_upsert_excluded_column(self)
+
+
+class _UpsertAssignmentExpression(AssignmentExpression):
+    __slots__ = ()
+
+    def _get_vars_to_consider_binding(self):
+        # Our super class doesn't do any binding of its
+        # left or right hand sides, but we need to bind our
+        # RHS so it has a context and can access version information.
+        return (('rhs', self.rhs,),)
+
+
+class _BindableList(DialectAware, list):
+    def bind(self, context, dialect=None):
+        return type(self)(
+            i.bind(context, dialect)
+            for i
+            in self
+        )
+
 
 class Upsert(Insert):
     """
@@ -138,15 +178,17 @@ class Upsert(Insert):
 
     @property
     def update_clause(self):
-        return Update(EmptyExpression(), [
-            AssignmentExpression(col, _ExcludedColumn(col.name))
-            for col in self.update_columns # pylint:disable=not-an-iterable
-        ])
+        return Update(EmptyExpression(), _BindableList(
+            _UpsertAssignmentExpression(col, _ExcludedColumn(col.name))
+            for col
+            in self.update_columns # pylint:disable=not-an-iterable
+        )).bind(self.context)
 
     def _visit_command(self, compiler):
         compiler.emit_keyword_upsert()
 
     def _visit_select(self, compiler):
+        compiler.visit_upsert_before_select(self.select)
         super()._visit_select(compiler)
         compiler.visit_upsert_after_select(self.select)
 

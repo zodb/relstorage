@@ -10,10 +10,9 @@
 - Add the "Requires Python" metadata to prevent installation on Python
   < 3.8.
 - Add support for Python 3.11.
-- Bump tested database drivers to their latest versions, with the
-  exception of ``mysql-connector-python``; this driver is only tested
-  at version 8.0.31 as there are known incompatibilities with 8.0.32
-  (which is currently the latest version).
+- Bump tested database drivers to their latest versions. In
+  particular, the ``mysql-connector-python`` supported version is now
+  8.0.32, which introduces charset changes.
 - pg8000: Require 1.29.0. See :issue:`495`.
 - Fix the SQLite ZODB URI resolver. The ``data_dir`` query parameter
   replaces the ``path`` query parameter.
@@ -24,6 +23,14 @@
   revision of the object accessible. Previously, the most recent
   revision of the object became unavailable. See :pr:`484`, with
   thanks to Kirill Smelkov.
+- Add support for MySQL 8.0.20 and above. In version 8.0.19, MySQL
+  deprecated the traditional ``SET col = VALUES(col)`` upsert syntax
+  in favor of a more PostgreSQL like ``SET col = excluded.col``
+  syntax. In version 8.0.20, MySQL started issuing warnings about the
+  older syntax, and in certain database drivers (MySQL
+  Connector/Python 8.0.32+) these warnings became ``TypeError`` exceptions
+  (due to a bug in the driver). Now, we use the new syntax on versions
+  that support it.
 
 3.5.0 (2022-09-16)
 ==================

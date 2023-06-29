@@ -290,6 +290,9 @@ class Compiler(object):
         self.emit('NULL')
 
     def emit_w_padding_space(self, value):
+        """
+        Emits the *value*, being sure it is surrounded by whitespace.
+        """
         ended_in_space = self.buf.getvalue().endswith(' ')
         value = value.strip()
         if not ended_in_space:
@@ -463,19 +466,49 @@ class Compiler(object):
         self.visit(update)
 
     def visit_upsert_excluded_column(self, column):
+        """
+        Called for each column on the right-hand-side of
+        ``ON DUPLICATE KEY UPDATE c = <EXCLUDED>``
+        (i.e., for the ``<EXCLUDED>`` portion).
+
+        By default, we use the PostgreSQL syntax to
+        refer to these columns using the 'excluded.'
+        table alias.
+        """
         self.emit('excluded.')
         self.emit(column.name)
+
+    def visit_upsert_values(self, values):
+        """
+        Called after emitting a ``VALUES ...`` clause for upserting.
+
+        We will be constructing SQL that basically looks like this::
+
+            INSERT INTO table (c1, c2)
+            VALUES (%s, %s), (%s, %s)  ......
+            ON DUPLICATE KEY UPDATE    ^^^^^^
+               .....
+
+        The location of the carets is where we are located in the
+        construction phase. This method is called to allow
+        setting a table alias for the VALUES clause. (Needed in MySQL 8.0.19
+        and above.) The default implementation does nothing,
+        but if you assign a table alias, it's good to use "excluded",
+        as that matches what PostgreSQL does.
+        """
 
     def visit_upsert_after_select(self, select): # pylint:disable=unused-argument
         pass
 
-class _DefaultContext(object):
+    def visit_upsert_before_select(self, select): # pylint:disable=unused-argument
+        pass
 
+
+class _DefaultContext(object):
     keep_history = True
 
 
 class DialectAware(object):
-
     context = _DefaultContext()
     dialect = _MissingDialect()
 
@@ -512,12 +545,19 @@ class DialectAware(object):
             dialect = self._find_dialect(context)
 
         assert dialect is not None
-
         new = copy(self)
         # pylint:disable-next=protected-access
         return new._bound_to(context, dialect)
 
     _bind_vars_ignored = ()
+
+    def _get_vars_to_consider_binding(self):
+        """
+        Return an iterable of key/value pairs, where
+        key is the name of the attribute; the value will
+        be checked to see if it should be bound.
+        """
+        return vars(self).items()
 
     def _bound_to(self, context, dialect):
         # Called on the copy of self.
@@ -528,7 +568,7 @@ class DialectAware(object):
         bound_replacements = {
             k: v.bind(context, dialect)
             for k, v
-            in vars(self).items()
+            in self._get_vars_to_consider_binding()
             if k not in self._bind_vars_ignored and isinstance(v, DialectAware)
         }
         for k, v in bound_replacements.items():

@@ -44,7 +44,10 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     PRIORITY = 4
     PRIORITY_PYPY = 2
     REQUIREMENTS = (
-        'mysql-connector-python == 8.0.31',
+        # 8.0.32 changes character set handling,
+        # adds init_command
+
+        'mysql-connector-python >= 8.0.32',
     )
 
 
@@ -58,15 +61,12 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         super().__init__()
         # This driver doesn't support ``init_command``, we have to run
         # it manually.
-        self.__init_command = self._init_command
-        del self._init_command
+        #self.__init_command = self._init_command
+        #del self._init_command
 
         # conn.close() -> InternalError: Unread result found
         # By the time we get to a close(), it's too late to do anything about it.
         self.close_exceptions += (self.driver_module.InternalError,)
-        if self.Binary is str:
-            self.Binary = bytearray
-
         self.mysql_deadlock_exc = self.driver_module.DatabaseError
 
         if PYPY:
@@ -120,9 +120,6 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
             # The Python implementation calls row_to_python(), the C version
             # calls to_python()
-
-            # XXX: It's possible this area is where the problems on
-            # mysql.connector >= 8.0.33 are introduced.
             class BlobConverter(mysql.connector.conversion.MySQLConverter):
                 # There are a few places we get into trouble on
                 # Python 2/3 with bytearrays coming back: they
@@ -152,7 +149,28 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # returns bytearray under Py2
         kwargs['use_pure'] = self.USE_PURE
         kwargs['converter_class'] = self._get_converter_class()
-        kwargs['get_warnings'] = True
+
+        # Prior to 8.0.32, we fetched and displayed warnings.
+        #
+        # But 8.0.32 is MESSED UP. First, it tries to use
+        # ``warnings.warn(integer)``, which raises a TypeError. Second
+        # and most importantly, there is no combination of
+        # ``charecter_set_*`` settings that let it work without
+        # warnings and/or errors. If we set those to ``utf8mb4``, then
+        # when we try to send pickle values we get a warning "(1300)
+        # Invalid utf8mb4 character string: '800363'" (and because of
+        # bug number one, this becomes an Exception). And if we set
+        # them to ``binary`` then when we try to send JSON values we
+        # get a hard error from the DB: "(22032): Cannot create a JSON
+        # value from a string with CHARACTER SET 'binary'" --- this is
+        # despite installing the procs with that character set.
+        #
+        # PyMySQL handles this by using the ``_binary`` character set
+        # introducer, but I don't find a way to insert that here. The
+        # only workaround I've found is to just ignore the warnings...
+
+        kwargs['get_warnings'] = False
+
         # By default, make it fetch all rows for the cursor, like most
         # drivers do. Unless we do this, cursors won't buffer, so we
         # don't know how many rows there are. That's fine and within
@@ -162,13 +180,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # prepared cursor, but the prepared cursor doesn't gain us
         # anything anyway.
         kwargs['buffered'] = True
-        conn = super().connect(*args, **kwargs)
-        cur = conn.cursor()
-        try:
-            cur.execute(self.__init_command)
-        finally:
-            cur.close()
-        return conn
+        return super().connect(*args, **kwargs)
 
     def cursor(self, conn, server_side=False):
         if server_side:

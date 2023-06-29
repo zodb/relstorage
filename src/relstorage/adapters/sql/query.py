@@ -223,6 +223,7 @@ class CompiledQuery(object):
                 cursor.execute(self._prepare_stmt)
             params = self._prepare_converter(params)
 
+        __traceback_info__ = stmt
         if params:
             cursor.execute(stmt, params)
         elif self.params:
@@ -234,4 +235,5 @@ class CompiledQuery(object):
             cursor.execute(stmt)
 
     def executemany(self, cursor, paramlist):
+        __traceback_info__ = self.stmt
         return cursor.executemany(self.stmt, paramlist)

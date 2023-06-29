@@ -273,9 +273,8 @@ setup(
             # mysqlclient (binary) on all CPythons. It's the default.
             'mysqlclient >= 2.0.0',
             # mysql-connector-python; one of two pure-python versions
-            # XXX: >= 8.0.32 has issues with binary values!
             # This requirement is repeated in the driver class.
-            'mysql-connector-python == 8.0.31; python_version == "3.10"',
+            'mysql-connector-python >= 8.0.32; python_version == "3.10"',
 
             # postgresql
             # pure-python

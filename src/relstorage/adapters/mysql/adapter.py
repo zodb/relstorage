@@ -142,6 +142,7 @@ class MySQLAdapter(AbstractAdapter):
             self.mover = MySQLObjectMover(
                 driver,
                 options=options,
+                version_detector=self.version_detector,
             )
 
         if self.oidallocator is None:

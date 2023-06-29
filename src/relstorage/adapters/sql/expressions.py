@@ -100,6 +100,10 @@ def as_expression(stmt):
 class BinaryExpression(Expression):
     """
     Expresses a comparison.
+
+    .. caution:: The left and right hand side expressions
+       are kept in slots, meaning they don't get bound by default
+       in `bind()`
     """
 
     __slots__ = (

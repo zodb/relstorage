@@ -53,7 +53,6 @@ class PyMySQLDriver(AbstractMySQLDriver):
 
     def __init__(self):
         super().__init__()
-
         pymysql_err = self.driver_module
 
         # Under PyMySql through at least 0.6.6, closing an already closed

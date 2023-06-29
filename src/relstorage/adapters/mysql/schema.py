@@ -255,6 +255,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         # On ``INSERT INTO object_state...`` where the values are all parameterized
         # and are all bytstrings
         cursor.execute('SET SESSION character_set_client = utf8mb4, '
+                       'character_set_connection = utf8mb4, '
+                       'character_set_results = utf8mb4, '
                        'collation_connection = utf8mb4_general_ci')
 
         for name, create_stmt in self.procedures.items():
@@ -269,12 +271,13 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 FOR_SHARE=for_share
             )
             assert checksum in create_stmt
+
             if name in installed:
                 installed_proc = installed[name]
                 stored_checksum = installed_proc.checksum
                 character_set_client = installed_proc.character_set_client
                 collation_connection = installed_proc.collation_connection
-                expected = (checksum, 'utf8', 'utf8_general_ci')
+                expected = (checksum, 'utf8mb4', 'utf8mb4_general_ci')
                 if expected != (stored_checksum, character_set_client, collation_connection):
                     logger.info(
                         "Re-creating procedure %s due to mismatch %s != %s",
@@ -366,3 +369,17 @@ class MySQLVersionDetector(DatabaseHelpersMixin):
         See https://github.com/zodb/relstorage/pull/287#issuecomment-515518727
         """
         return self.get_version_info(cursor) >= (5, 7, 19)
+
+    def requires_values_upsert_alias(self, cursor):
+        """
+        Do we need to use ``INSERT INTO t(c1) VALUES (%s) AS
+        EXCLUDED``?
+
+        This is available on 8.0.19, and absolutely needed on 8.0.20,
+        else we get warnings from the database, which some drivers
+        like to turn into Python warnings (and which they get wrong
+        --- I'm looking at you, MySQLConnector/Python; it causes a
+        type error because the warning object it tries to warn has an
+        integer error code as its first arg, which causes a TyeError)
+        """
+        return self.get_version_info(cursor) >= (8, 0, 19)

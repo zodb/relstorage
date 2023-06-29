@@ -55,7 +55,6 @@ class MySQLCompiler(Compiler):
     # more similar to what PostgreSQL uses, possibly allowing more
     # query sharing (with a smarter query runner/interpreter).
 
-
     def visit_upsert_conflict_column(self, _column):
         self.emit_keyword('ON DUPLICATE KEY')
 
@@ -63,8 +62,49 @@ class MySQLCompiler(Compiler):
         self.emit_keyword('UPDATE')
         self.visit_csv(update.col_expressions)
 
+    def visit_upsert_values(self, values):
+        # If we are on 8.0.19 or newer,
+        # we need to emit the 'excluded' alias.
+
+        # By the time we're compiling statements, we've already
+        # initialized the schema, which means that we queried
+        # the version of the database, which means that we can
+        # use the version detector without passing in a cursor
+        ver_det = values.context.version_detector
+        if ver_det.requires_values_upsert_alias(None):
+            self.emit_w_padding_space('AS excluded')
+
     def visit_upsert_excluded_column(self, column):
-        self.emit('VALUES(%s)' % (column.name,))
+        # see visit_upsert_values
+        ver_det = column.context.version_detector
+        if ver_det.requires_values_upsert_alias(None):
+            super().visit_upsert_excluded_column(column)
+        else:
+            # Prior to 8.0.19
+            self.emit('VALUES(%s)' % (column.name,))
+
+    def visit_upsert_before_select(self, select):
+        # See the previous visit_upsert methods.
+        # Here, we have to transform
+        #
+        # INSERT INTO t(c)
+        # SELECT c FROM foo
+        # ON DUPLICATE KEY UPDATE c = VALUES(foo)
+        #
+        # into a nested subquery that we can name:
+        #
+        # INSERT INTO t(c)
+        # SELECT * FROM (SELECT c FROM foo) AS excluded
+        # ON DUPLICATE KEY UPDATE c = VALUES(foo)
+
+        ver_det = select.context.version_detector
+        if ver_det.requires_values_upsert_alias(None):
+            self.emit('SELECT * FROM (')
+
+    def visit_upsert_after_select(self, select):
+        ver_det = select.context.version_detector
+        if ver_det.requires_values_upsert_alias(None):
+            self.emit(') AS excluded')
 
 
 class MySQLDialect(DefaultDialect):
@@ -84,6 +124,7 @@ class MySQLDialect(DefaultDialect):
     def compiler_class(self):
         return MySQLCompiler
 
+
 class IterateFetchmanyMixin(object):
     """
     Mixin to cause us to fetch in batches using fetchmany().
@@ -101,6 +142,7 @@ class IterateFetchmanyMixin(object):
             batch = fetch()
 
     next = __next__ = None
+
 
 class AbstractMySQLDriver(AbstractModuleDriver):
 

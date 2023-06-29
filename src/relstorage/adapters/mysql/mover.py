@@ -95,21 +95,30 @@ class MySQLObjectMover(AbstractObjectMover):
 
         Used for copying transactions into this database.
         """
+        if self.version_detector.requires_values_upsert_alias(cursor):
+            def VALUES(col):
+                return 'NEW.' + col
+        else:
+            def VALUES(col):
+                return f'VALUES({col})'
+
         if self.keep_history:
-            suffix = """
+            suffix = f"""
+            AS NEW
             ON DUPLICATE KEY UPDATE
-                tid = VALUES(tid),
-                prev_tid = VALUES(prev_tid),
-                md5 = VALUES(md5),
-                state_size = VALUES(state_size),
-                state = VALUES(state)
+                tid = {VALUES('tid')},
+                prev_tid = {VALUES('prev_tid')},
+                md5 = {VALUES('md5')},
+                state_size = {VALUES('state_size')},
+                state = {VALUES('state')}
             """
         else:
-            suffix = """
+            suffix = f"""
+            AS NEW
             ON DUPLICATE KEY UPDATE
-                tid = VALUES(tid),
-                state_size = VALUES(state_size),
-                state = VALUES(state)
+                tid = {VALUES('tid')},
+                state_size = {VALUES('state_size')},
+                state = {VALUES('state')}
             """
         self._generic_restore(batcher, oid, tid, data,
                               command='INSERT', suffix=suffix)
