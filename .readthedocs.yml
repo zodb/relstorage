@@ -17,8 +17,11 @@ sphinx:
 
 # Set the version of Python and requirements required to build your
 # docs
+build:
+  tools:
+    python: "3.11"
+
 python:
-  version: 3
   install:
     - method: pip
       path: .
