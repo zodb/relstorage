@@ -507,6 +507,8 @@ class Compiler(object):
 class _DefaultContext(object):
     keep_history = True
 
+class NoDialectFoundError(TypeError):
+    "Raised when we cannot find a dialect."
 
 class DialectAware(object):
     context = _DefaultContext()
@@ -537,7 +539,10 @@ class DialectAware(object):
             else:
                 return dialect.bind(context)
         __traceback_info__ = getattr(context, '__dict__', ()) # vars() doesn't work on e.g., None
-        raise TypeError("Unable to bind to %s; no dialect found" % (context,))
+        raise NoDialectFoundError("Unable to bind %s to %s; no dialect found" % (
+            type(self),
+            context,
+        ))
 
     def bind(self, context, dialect=None):
         assert self.context is DialectAware.context, "already bound"

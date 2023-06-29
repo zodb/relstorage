@@ -99,12 +99,12 @@ class MySQLCompiler(Compiler):
 
         ver_det = select.context.version_detector
         if ver_det.requires_values_upsert_alias(None):
-            self.emit('SELECT * FROM (')
+            self.emit_w_padding_space('SELECT * FROM (')
 
     def visit_upsert_after_select(self, select):
         ver_det = select.context.version_detector
         if ver_det.requires_values_upsert_alias(None):
-            self.emit(') AS excluded')
+            self.emit_w_padding_space(') AS excluded')
 
 
 class MySQLDialect(DefaultDialect):

@@ -7,6 +7,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
 from zope.interface import implementer
 
 from .query import Query
@@ -23,9 +25,12 @@ from .expressions import EmptyExpression
 from .expressions import Expression
 from .expressions import ParamMixin
 from .dialect import DialectAware
+from .dialect import NoDialectFoundError
 
 # pylint objects to __compile_visit.*__
 # pylint:disable=bad-dunder-name
+
+logger = logging.getLogger(__name__)
 
 class _ValuesPlaceholderList(ColumnList):
     pass
@@ -86,7 +91,11 @@ class Insert(Query):
             self._visit_select(compiler)
         else:
             values = _InsertValuesClause(self.column_list)
-            values = values.bind(self.context)
+            try:
+                values = values.bind(self.context)
+            except NoDialectFoundError:
+                # Should only happen in testing.
+                logger.debug('Unable to find dialect', exc_info=True)
             compiler.visit(values)
         compiler.emit(self.epilogue)
 
@@ -178,11 +187,16 @@ class Upsert(Insert):
 
     @property
     def update_clause(self):
-        return Update(EmptyExpression(), _BindableList(
+        update = Update(EmptyExpression(), _BindableList(
             _UpsertAssignmentExpression(col, _ExcludedColumn(col.name))
             for col
             in self.update_columns # pylint:disable=not-an-iterable
-        )).bind(self.context)
+        ))
+        try:
+            return update.bind(self.context)
+        except NoDialectFoundError:
+            # Should only happen in testing
+            return update
 
     def _visit_command(self, compiler):
         compiler.emit_keyword_upsert()

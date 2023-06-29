@@ -467,7 +467,7 @@ class TestUpsert(TestCase):
             it.c.state,
             it.c.tid,
             it.c.state_size
-        ).bind(self)
+        ).bind(self.get_bind_context())
 
         self.assertEqual(
             str(stmt),
@@ -509,7 +509,7 @@ class TestUpsert(TestCase):
             it.c.state,
             it.c.tid,
             it.c.state_size
-        ).bind(self)
+        ).bind(self.get_bind_context())
 
         self.maxDiff = None
         self.assertEqual(
@@ -549,10 +549,13 @@ class TestUpsert(TestCase):
             it.c.state,
             it.c.tid,
             it.c.state_size
-        ).bind(self)
+        ).bind(self.get_bind_context())
 
         self.maxDiff = None
         self.assertEqual(
             str(stmt),
             self.upsert_unconstrained_subquery
         )
+
+    def get_bind_context(self):
+        return self
