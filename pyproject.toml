@@ -15,8 +15,11 @@ requires = [
      # 3.0 in general has improved language support.
      # Python 3.12 requires a snapshot at this writing (2023-06-29). This is just before
      # 3.0rc1
-     "Cython >= 3.0b3; python_version < '3.12'",
+     # Unfortunately, markers like python_version do not work for remote installs,
+     # so we may always get that one?
+     # Remember to change this in tests.yml as well
      "Cython @ https://github.com/cython/cython/archive/37f4dcdc04547875e2836fda076f5707ec50e579.zip",
+     "Cython >= 3.0b3; python_version < '3.12'",
      # cffi on py3.12 macOS at least fails to install from its wheel if we let it get installed
      # as part of persistent:
      # OSError: [Errno 66] Directory not empty: '///persistent.../.eggs/cffi-1.15.1-py3.12-macosx-10.9-universal2.egg/cffi-1.15.1.dist-info' -> '//persistent_/.eggs/cffi-1.15.1-py3.12-macosx-10.9-universal2.egg/EGG-INFO'

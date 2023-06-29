@@ -115,7 +115,7 @@ jobs:
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'cython>=3.0b3'
+          pip install -q -U 'cython>=3.0b3; python_version < "3.12"' "Cython @ https://github.com/cython/cython/archive/37f4dcdc04547875e2836fda076f5707ec50e579.zip; python_version >= '3.12'"
           pip install -U coverage
           pip install -U cffi
       - name: Build mysqlclient
