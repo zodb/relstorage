@@ -184,7 +184,7 @@ class TestBlobCacheMixin(TestBlobMixin):
         threads = [threading.Thread(target=client, args=(i,))
                    for i in range(self.CLIENT_COUNT)]
         for thread in threads:
-            thread.setDaemon(True)
+            thread.daemon = True
             thread.start()
 
         for thread in threads:

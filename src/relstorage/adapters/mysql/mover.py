@@ -96,15 +96,17 @@ class MySQLObjectMover(AbstractObjectMover):
         Used for copying transactions into this database.
         """
         if self.version_detector.requires_values_upsert_alias(cursor):
+            alias = 'AS NEW'
             def VALUES(col):
                 return 'NEW.' + col
         else:
+            alias = ''
             def VALUES(col):
                 return f'VALUES({col})'
 
         if self.keep_history:
             suffix = f"""
-            AS NEW
+            {alias}
             ON DUPLICATE KEY UPDATE
                 tid = {VALUES('tid')},
                 prev_tid = {VALUES('prev_tid')},
@@ -114,7 +116,7 @@ class MySQLObjectMover(AbstractObjectMover):
             """
         else:
             suffix = f"""
-            AS NEW
+            {alias}
             ON DUPLICATE KEY UPDATE
                 tid = {VALUES('tid')},
                 state_size = {VALUES('state_size')},
