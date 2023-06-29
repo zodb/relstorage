@@ -31,6 +31,7 @@ from relstorage.tests.util import RUNNING_ON_TRAVIS
 from relstorage.tests.util import RUNNING_ON_APPVEYOR
 from relstorage._compat import PYPY
 
+
 class Sqlite3AdapterMixin(object):
 
     def __get_db_name(self):

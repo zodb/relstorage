@@ -7,7 +7,11 @@ import traceback
 
 from nti.testing.time import MonotonicallyIncreasingTimeLayerMixin
 
-from gevent.exceptions import LoopExit
+try:
+    from gevent.exceptions import LoopExit
+except ModuleNotFoundError:
+    class LoopExit(Exception):
+        "Can never be thrown"
 
 from ZODB.DB import DB
 from ZODB.tests.util import setUp
