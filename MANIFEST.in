@@ -9,6 +9,7 @@ include CHANGES.rst
 include .landscape.yml
 include pyproject.toml
 recursive-include .travis *
+recursive-include scripts *.ps1
 
 recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h *.sql *.cpp
 recursive-include src *.pxd *.pyx
