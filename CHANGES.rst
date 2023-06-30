@@ -2,8 +2,8 @@
  Changes
 =========
 
-4.0.0 (unreleased)
-==================
+4.0.0a1 (2023-06-30)
+====================
 
 - Drop support for Python versions that are end of life, including
   everything less than 3.8.

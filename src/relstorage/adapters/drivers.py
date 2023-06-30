@@ -156,7 +156,7 @@ class AbstractModuleDriver(object):
     #: Do this only when a requirement cannot be specified in
     #: setup.py as an installation requirement.
     #:
-    #: .. versionadded:: NEXT
+    #: .. versionadded:: 4.0.0a1
     REQUIREMENTS = ()
 
     #: Priority of this driver, when available. Lower is better.

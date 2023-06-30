@@ -122,7 +122,7 @@ class OracleAdapterHelper(Resolver):
 
 class SqliteAdapterHelper(Resolver):
     """
-    .. versionchanged:: NEXT
+    .. versionchanged:: 4.0.0a1
         The ``data_dir`` argument replaces the ``path`` argument.
     """
     _string_args = ('data_dir',)
