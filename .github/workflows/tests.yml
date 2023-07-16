@@ -208,6 +208,7 @@ jobs:
           useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
       - name: Coveralls Parallel
         uses: coverallsapp/github-action@v2
+        if: ${{ !startsWith(matrix.python-version, 'pypy') }}
         with:
           flag-name: run-${{ join(matrix.*, '-') }}
           parallel: true
