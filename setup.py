@@ -236,8 +236,10 @@ setup(
             # 2.7.6+ is needed for PostgreSQL 11;
             # 2.8 is needed for conn.info
             'psycopg2 >= 2.8.3',
+        ],
+        'postgresql: platform_python_implementation == "CPython" and python_version == "3.12"': [
             # psycopg2 isn't importing on Appveyor/3.12b4.
-            'pg8000; python_version == "3.12" and sys_platform == "win32"',
+            'pg8000',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
             # 2.8.0+ is needed for Python 3.7
