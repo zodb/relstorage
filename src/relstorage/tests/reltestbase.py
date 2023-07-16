@@ -317,7 +317,7 @@ class GenericRelStorageTests(
         # checkWriteMethods in ReadOnlyStorage assumes that
         # the object has an undo() method, even though that's only
         # required if it's IStorageUndoable, aka history-preserving.
-        super()._make_readonly()
+        super()._make_readonly() # pylint:disable=no-member
         storage = self._storage
         if not hasattr(storage, 'undo'):
             def undo(*args, **kwargs):
