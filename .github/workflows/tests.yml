@@ -85,13 +85,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # XXX: PyPy 3.9 is failing to build zope.interface 6.0!
-        # Need to take this up with the zope.interface repo.
-        python-version: ['3.12-dev', 3.8, 3.9, '3.10', '3.11']
+        python-version: ['pypy-3.10', '3.12-dev', 3.8, 3.9, '3.10', '3.11']
         os: [ubuntu-latest, macos-latest]
         exclude:
           - os: macos-latest
-            python-version: pypy-3.9
+            python-version: pypy-3.10
           # Can't build persistent on 3.12 with -UNDEBUG because it
           # accesses fields of objects that aren't there in assert statements;
           # we build linux with assertions enabled, and there is no 3.12
@@ -121,7 +119,7 @@ jobs:
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'cython>=3.0b3; python_version < "3.12"' "Cython @ https://github.com/cython/cython/archive/37f4dcdc04547875e2836fda076f5707ec50e579.zip; python_version >= '3.12'"
+          pip install -q -U 'cython>=3.0rc2'
           pip install -U coverage
           pip install -U cffi
       - name: Build mysqlclient

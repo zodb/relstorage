@@ -73,8 +73,7 @@ tests_require = [
     'zc.zlibstorage',
     'zope.testrunner',
     'nti.testing',
-    # At this writing, gevent isn't supported on 3.12 yet.
-    'gevent >= 1.5a1; python_version < "3.12"',
+    'gevent >= 23.7.0',
     'pyperf',
     # Versions of PyPy2 prior to 7.4 (maybe?) are incompatible with
     # psutil >= 5.6.4.
