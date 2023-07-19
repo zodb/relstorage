@@ -106,7 +106,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
         cd RelStorage
         $variant/bin/pip install -U pip
         $variant/bin/pip install -U setuptools
-        $variant/bin/pip install -U 'cython>=3.0rc2'
+        $variant/bin/pip install -U 'cython>=3.0'
         PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
         auditwheel show dist/RelStorage*.whl
         auditwheel repair dist/RelStorage*.whl

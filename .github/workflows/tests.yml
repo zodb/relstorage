@@ -120,7 +120,7 @@ jobs:
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'cython>=3.0rc2'
+          pip install -q -U 'cython>=3.0'
           pip install -U coverage
           pip install -U cffi
       - name: Build mysqlclient

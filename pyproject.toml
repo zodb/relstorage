@@ -15,7 +15,7 @@ requires = [
      # 3.0 in general has improved language support.
      # Python 3.12 requires 3.0rc2
 
-     "Cython >= 3.0rc2",
+     "Cython >= 3.0",
      # cffi on py3.12 macOS at least fails to install from its wheel if we let it get installed
      # as part of persistent:
      # OSError: [Errno 66] Directory not empty: '///persistent.../.eggs/cffi-1.15.1-py3.12-macosx-10.9-universal2.egg/cffi-1.15.1.dist-info' -> '//persistent_/.eggs/cffi-1.15.1-py3.12-macosx-10.9-universal2.egg/EGG-INFO'
