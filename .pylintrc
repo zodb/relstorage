@@ -3,8 +3,6 @@ load-plugins=pylint.extensions.bad_builtin,
    pylint.extensions.code_style,
    pylint.extensions.dict_init_mutate,
    pylint.extensions.dunder,
-   pylint.extensions.emptystring,
-   pylint.extensions.comparetozero,
    pylint.extensions.comparison_placement,
    pylint.extensions.confusing_elif,
    pylint.extensions.for_any_all,
@@ -118,9 +116,12 @@ init-hook =
 # Into ``if (foo := get_foo()):``
 # But there are a *lot* of those. Trust people to do the right, most
 # readable, thing
-# unnecessary-lambda-assignment: We use this pattern a fair amount
-# redefined-variable-type: Fairly common
-# compare-to-zero: Often makes things less readable; an explicit == 0 can be better than 'not foo'
+#
+# XXX: unclear on the docstring warnings, missing-type-doc, missing-param-doc,
+# differing-param-doc, differing-type-doc (are the last two replacements for the first two?)
+#
+# They should be addressed, in general they are a good thing, but sometimes they are
+# unnecessary.
 disable=wrong-import-position,
     wrong-import-order,
     missing-docstring,
@@ -140,9 +141,12 @@ disable=wrong-import-position,
     unnecessary-lambda-assignment,
     redefined-variable-type,
     cyclic-import,
-    compare-to-zero,
-    missing-param-doc,
+    use-dict-literal,
     missing-type-doc,
+    missing-param-doc,
+    differing-param-doc,
+    differing-type-doc,
+    compare-to-zero
 
 enable=consider-using-augmented-assign
 
@@ -186,6 +190,7 @@ generated-members=REQUEST,acl_users,aq_parent,providedBy
 # and thus existing member attributes cannot be deduced by static analysis. It
 # supports qualified module names, as well as Unix pattern matching.
 #ignored-modules=gevent._corecffi,gevent.os,os,greenlet,threading,gevent.libev.corecffi,gevent.socket,gevent.core,gevent.testing.support
+ignored-modules=psycopg2.errors
 
 [DESIGN]
 max-attributes=12
@@ -201,8 +206,6 @@ unsafe-load-any-extension = yes
 extension-pkg-allow-list = relstorage.cache._objectindex,relstorage.cache.cache,relstorage._inthashmap
 # This does not seem to work, hence the init-hook
 property-classes=zope.cachedescriptors.property.Lazy,zope.cachedescriptors.property.Cached
-
-
 
 [CLASSES]
 # List of interface methods to ignore, separated by a comma. This is used for

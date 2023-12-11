@@ -979,7 +979,7 @@ class HistoryPreservingPackUndo(PackUndo):
     @metricmethod
     def pack(self, pack_tid, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
-        # pylint:disable=too-many-locals
+        # pylint:disable=too-many-locals,too-complex
         # Read committed mode is sufficient.
         store_connection = StoreConnection(self.connmanager)
         try: # pylint:disable=too-many-nested-blocks
@@ -1055,9 +1055,9 @@ class HistoryPreservingPackUndo(PackUndo):
                 store_connection.rollback_quietly()
                 raise
 
-            else:
-                logger.info("pack: finished successfully")
-                store_connection.commit()
+
+            logger.info("pack: finished successfully")
+            store_connection.commit()
         finally:
             store_connection.drop()
 
@@ -1454,9 +1454,9 @@ class HistoryFreePackUndo(PackUndo):
                 logger.exception("pre_pack: failed")
                 store_connection.rollback_quietly()
                 raise
-            else:
-                store_connection.commit()
-                logger.info("pre_pack: finished successfully")
+
+            store_connection.commit()
+            logger.info("pre_pack: finished successfully")
         finally:
             load_connection.drop()
             store_connection.drop()
@@ -1679,9 +1679,9 @@ class HistoryFreePackUndo(PackUndo):
                 store_connection.rollback_quietly()
                 raise
 
-            else:
-                logger.info("pack: finished successfully")
-                store_connection.commit()
+
+            logger.info("pack: finished successfully")
+            store_connection.commit()
         finally:
             store_connection.drop()
 

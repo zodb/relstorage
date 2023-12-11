@@ -46,7 +46,7 @@ class OracleRowBatcher(RowBatcher):
         # pylint:disable=too-many-locals
         def replace_var(match):
             name = match.group(1)
-            new_name = '%s_%d' % (name, rownum) # pylint:disable=undefined-loop-variable
+            new_name = '%s_%d' % (name, rownum) # pylint:disable=used-before-assignment
             if name in self.inputsizes:
                 stmt_inputsizes[new_name] = self.inputsizes[name]
             params[new_name] = row[name]

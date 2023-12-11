@@ -297,11 +297,11 @@ class AbstractConnectionManager(object):
                 self.rollback_and_close(conn, cursor)
                 conn, cursor = None, None
                 raise
-            else:
-                self.close(None, cursor)
-                cursor = None
-                self.commit(conn)
-                return res
+
+            self.close(None, cursor)
+            cursor = None
+            self.commit(conn)
+            return res
         finally:
             self.close(conn, cursor)
 

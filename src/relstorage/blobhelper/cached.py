@@ -670,8 +670,8 @@ class _BlobCacheSizeChecker(timer):
                 ZODB.blob.remove_committed(file_path)
             except OSError:
                 return 0 # probably open on windows
-            else:
-                return fsize
+
+            return fsize
         finally:
             lock.close()
 
