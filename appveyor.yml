@@ -70,15 +70,17 @@ environment:
       PYTHON_EXE: python
       GWHEEL_ONLY: true
 
-
+# The images have moved to MySQL8 only, and that cannot
+# currently (Dec 2023) be started with the services: syntax.
+# See https://github.com/appveyor/ci/issues/3834
 services:
-  - mysql
   - postgresql101
 
 install:
   - ECHO "Filesystem root:"
   - ps: "ls \"C:/\""
   - ps: "ls \"C:/Program Files/\""
+  - ps: "ls \"C:/Program Files/MySQL\""
   - ps: "ls \"C:/Program Files (x86)/\""
 
   - ECHO "Installed SDKs:"
@@ -118,7 +120,9 @@ install:
   # So we violate DRY and repeate some requirements in order to use
   # --no-build-isolation
   - "%CMD_IN_ENV% %PYEXE% -m pip install -U pycparser wheel \"cython>=3.0\" setuptools cffi twine"
-
+  # Have to manually start MySQL8. See above.
+  - ECHO "Starting MySQL 8"
+  - ps: Start-Service MySQL80
 
 build_script:
   # Build the compiled extension
