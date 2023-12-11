@@ -2,7 +2,7 @@
  Changes
 =========
 
-4.0.0 (unreleased)
+4.0.0 (2023-12-11)
 ==================
 
 - Packaging: Support for Python 3.12 uses released dependencies.
