@@ -111,6 +111,13 @@ namespace relstorage {
             this->destroy(other);
             this->deallocate(other, 1);
         }
+
+        // This member is deprecated in C++17 and removed in C++20,
+        // but gcc 13 requires it when compiling in C++11 mode.
+        template< class U >
+        struct rebind {
+            typedef PythonAllocator<U> other;
+        };
     };
 };
 
