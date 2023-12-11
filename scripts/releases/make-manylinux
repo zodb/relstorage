@@ -39,6 +39,10 @@ export CCACHE_DIR="/ccache"
 # Disable some warnings produced by libev especially and also some Cython generated code.
 # Note that changing the value of these variables invalidates configure caches
 SLOW_BUILD=''
+# Some images/archs (specificaly 2014_aarch64) don't have ccache;
+# This also seems to have vanished for manylinux_2010 x64/64 after November 30
+# 2020 when the OS went EOL and the package repos switched to the "vault"
+NEED_CCACHE=1
 GEVENT_WARNFLAGS="-Wno-strict-aliasing -Wno-comment -Wno-unused-value -Wno-unused-but-set-variable -Wno-sign-compare -Wno-parentheses -Wno-unused-function -Wno-tautological-compare -Wno-strict-prototypes -Wno-return-type -Wno-misleading-indentation"
 OPTIMIZATION_FLAGS="-pipe"
 if [ -n "$GITHUB_ACTIONS" ]; then
@@ -48,10 +52,12 @@ if [ -n "$GITHUB_ACTIONS" ]; then
         echo "Compiling with -O1"
         OPTIMIZATION_FLAGS="-pipe -O1"
         SLOW_BUILD=1
+        NEED_CCACHE=1
     fi
 else
     echo "Compiling with -O3"
     OPTIMIZATION_FLAGS="-pipe -O3"
+    NEED_CCACHE=1
 fi
 
 export CFLAGS="$OPTIMIZATION_FLAGS $GEVENT_WARNFLAGS"
@@ -78,10 +84,8 @@ if [ -d /RelStorage -a -d /opt/python ]; then
 
     if [ -e /usr/bin/yum ]; then
         # manylinux
-        # Some images/archs (specificaly 2014_aarch64) don't have ccache;
-        # This also seems to have vanished for manylinux_2010 x64/64 after November 30
-        # 2020 when the OS went EOL and the package repos switched to the "vault"
-        if [ -n "$SLOW_BUILD" ] ; then
+
+        if [ -n "$NEED_CCACHE" ] ; then
             # This provides access to ccache for the 2014 image; it is already installed in the
             # s390x image.
             echo Installing epel
