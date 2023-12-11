@@ -5,10 +5,11 @@
 4.0.0 (unreleased)
 ==================
 
+- Packaging: Support for Python 3.12 uses released dependencies.
 - Packaging: Fix a build error with gcc 13.
-- Support for Python 3.12 uses released dependencies.
 - Packaging: x86_64 manylinux wheels are built using a newer
   supported manylinux Docker image.
+- Packaging: Testing on Windows has moved from MySQL 5.7 to MySQL 8.
 
 
 4.0.0a1 (2023-06-30)
