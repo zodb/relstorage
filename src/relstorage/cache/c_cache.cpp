@@ -12,6 +12,8 @@
 
  ****************************************************************************/
 
+// gcc 13 is more picky about includes than earlier versions.
+#include <string>
 #include <memory>
 #include <vector>
 #include "c_cache.h"

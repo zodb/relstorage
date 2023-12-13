@@ -13,6 +13,8 @@
 ##############################################################################
 import sys
 import os
+import platform
+
 from setuptools import setup
 from setuptools import find_packages
 from setuptools import Extension
@@ -81,6 +83,70 @@ tests_require = [
     'psutil; platform_python_implementation=="CPython" or python_version!="2.7"',
 ] + memcache_require
 
+# Extra compiler arguments passed to C++ extensions
+cpp_compile_args = []
+
+# Extra linker arguments passed to C++ extensions
+cpp_link_args = []
+
+plat_platform = platform.platform()
+plat_machine = platform.machine()
+plat_compiler = platform.python_compiler()
+
+if not os.environ.get('RELSTORAGE_SETUP_NO_FLAGS'):
+    # Provide a temporary, undocumented, unsupported, escape hatch in case we get
+    # any flags wrong. If you need this, please let the maintainers know!
+    if sys.platform == 'darwin' or 'clang' in plat_compiler:
+        # The clang compiler doesn't use --std=c++11 by default
+        cpp_compile_args.append("--std=gnu++11")
+    elif WINDOWS and "MSC" in plat_compiler:
+        # Older versions of MSVC (Python 2.7) don't handle C++ exceptions
+        # correctly by default. While newer versions do handle exceptions
+        # by default, they don't do it fully correctly ("By default....the
+        # compiler generates code that only partially supports C++
+        # exceptions."). So we need an argument on all versions.
+
+        #"/EH" == exception handling.
+        #    "s" == standard C++,
+        #    "c" == extern C functions don't throw
+        # OR
+        #   "a" == standard C++, and Windows SEH; anything may throw, compiler optimizations
+        #          around try blocks are less aggressive. Because this catches SEH,
+        #          which Windows uses internally, the MS docs say this can be a security issue.
+        #          DO NOT USE.
+        # /EHsc is suggested, and /EHa isn't supposed to be linked to other things not built
+        # with it. Leaving off the "c" should just result in slower, safer code.
+        # Other options:
+        #    "r" == Always generate standard confirming checks for noexcept blocks, terminating
+        #           if violated. IMPORTANT: We rely on this.
+        # See
+        # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
+        #    ?view=msvc-170
+        handler = "/EHsr"
+        cpp_compile_args.append(handler)
+        # To disable most optimizations:
+        #cpp_compile_args.append('/Od')
+
+        # To enable assertions:
+        #cpp_compile_args.append('/UNDEBUG')
+
+        # To enable more compile-time warnings (/Wall produces a mountain of output).
+        #cpp_compile_args.append('/W4')
+
+        # To link with the debug C runtime...except we can't because we need
+        # the Python debug lib too, and they're not around by default
+        # cpp_compile_args.append('/MDd')
+
+        # Support fiber-safe thread-local storage: "the compiler mustn't
+        # cache the address of the TLS array, or optimize it as a common
+        # subexpression across a function call." This would probably solve
+        # some of the issues we had with MSVC caching the thread local
+        # variables on the stack, leading to having to split some
+        # functions up. Revisit those.
+        cpp_compile_args.append("/GT")
+
+extra_compile_args = cpp_compile_args
+extra_link_args = cpp_link_args
 
 setup(
     name="RelStorage",
@@ -165,7 +231,8 @@ setup(
                     'src/relstorage/cache/c_cache.cpp',
                 ],
                 include_dirs=['include', 'src/relstorage'],
-                extra_compile_args=[],
+                extra_compile_args=extra_compile_args,
+                extra_link_args=extra_link_args,
             ),
             Extension(
                 name="relstorage._inthashmap",
@@ -174,7 +241,8 @@ setup(
                     'src/relstorage/_inthashmap.pyx',
                 ],
                 include_dirs=['include'],
-                extra_compile_args=[],
+                extra_compile_args=extra_compile_args,
+                extra_link_args=extra_link_args,
             ),
             Extension(
                 name="relstorage.cache._objectindex",
@@ -183,7 +251,8 @@ setup(
                     'src/relstorage/cache/_objectindex.pyx',
                 ],
                 include_dirs=['include', 'src/relstorage'],
-                extra_compile_args=[],
+                extra_compile_args=extra_compile_args,
+                extra_link_args=extra_link_args,
             ),
         ],
         annotate=True,
