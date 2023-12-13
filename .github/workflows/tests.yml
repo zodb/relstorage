@@ -85,7 +85,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ['pypy-3.10', '3.12', 3.8, 3.9, '3.10', '3.11']
+        # 3.12.1 breaks zope.testrunner.
+        # See https://github.com/zopefoundation/zope.testrunner/issues/157
+        python-version: ['pypy-3.10', '3.12.0', 3.8, 3.9, '3.10', '3.11']
         os: [ubuntu-latest, macos-latest]
         exclude:
           # Can't build persistent on 3.12 with -UNDEBUG because it

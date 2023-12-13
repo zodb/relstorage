@@ -2,10 +2,13 @@
  Changes
 =========
 
-4.0.1 (unreleased)
+4.1.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Update the bundled version of the Boost libraries from 1.75 to 1.83
+  to support newer compilers like GCC 13.
+- Compile in C++ 11 mode instead of whatever the compiler default was
+  (sometimes C++ 03), because the latter is deprecated by Boost.
 
 
 4.0.0 (2023-12-11)

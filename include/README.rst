@@ -31,3 +31,11 @@ A one liner to update from a boost distribution unpacked beside this
 boost/ directory::
 
     for i in  `find . -type f`; do gcp -f ../boost_1_75_0/boost/${i:2} $i; done
+
+1.83
+====
+
+In December 2023, this was updated to boost 1.83 to fix compilation
+problems with gcc13, using a similar one-liner::
+
+    for i in  `find . -type f`; do gcp -f ../boost_1_83_0/boost/${i:2} $i; done
