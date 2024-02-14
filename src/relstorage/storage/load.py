@@ -200,6 +200,30 @@ class Loader(object):
 
         raise self.__pke(oid, tid_int=tid_int, state=state)
 
+    @stale_aware
+    @storage_method
+    @metricmethod_sampled
+    def loadBeforeEx(self, oid, tid): # -> (state, serial)
+        """
+        Return most recent revision of oid before tid committed.
+        (see IStorageLoadBeforeEx)
+        """
+        oid_int = bytes8_to_int64(oid)
+        cursor = self.load_connection.cursor
+        state, serial_tid = self._loadBeforeEx(cursor, oid_int, tid)
+        serial = int64_to_8bytes(serial_tid)
+        return state, serial
+
+    def _loadBeforeEx(self, cursor, oid_int, tid): # -> (state, serial_tid)
+        # serves loadBeforeEx and loadBefore
+        state, start_tid = self.adapter.mover.load_before(
+            cursor, oid_int, bytes8_to_int64(tid))
+
+        if start_tid is None:
+            assert state is None
+            start_tid = 0
+
+        return state, start_tid
 
     @stale_aware
     @storage_method
@@ -225,6 +249,8 @@ class Loader(object):
 
         # TODO: This makes three separate queries, and also bypasses the cache.
         # We should be able to fix at least the multiple queries.
+        # ( this is "fixed" on recent ZODB which calls loadBeforeEx instead of
+        #   loadBefore after https://github.com/zopefoundation/ZODB/pull/323 )
 
         # In the past, we would use the store connection (only if it was already open)
         # to "allow leading dato from later transactions for conflict resolution".
@@ -242,10 +268,8 @@ class Loader(object):
         if not self.adapter.mover.exists(cursor, oid_int):
             raise self.__pke(oid, exists=False)
 
-        state, start_tid = self.adapter.mover.load_before(
-            cursor, oid_int, bytes8_to_int64(tid))
-
-        if start_tid is None:
+        state, start_tid = self._loadBeforeEx(cursor, oid_int, tid)
+        if start_tid == 0:
             return None
 
         if state is None:
