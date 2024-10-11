@@ -225,9 +225,12 @@ class UsesThreadsOnASingleStorageMixin(object):
                 self._storage = orig_storage
 
     def __generic_wrapped_test(self, meth_name):
-        meth = getattr(
-            super(),
-            meth_name)
+        try:
+            meth = getattr(
+                super(),
+                meth_name)
+        except AttributeError:
+            self.skipTest('No method ' + meth_name)
         try:
             with self.__thread_safe_wrapper():
                 meth()
@@ -1119,11 +1122,11 @@ class GenericRelStorageTests(
         from ZODB.ConflictResolution import logger as CRLogger
         from BTrees.Length import Length
         import BTrees
-        from six import reraise
 
         def log_err(*args, **kwargs): # pylint:disable=unused-argument
             import sys
-            reraise(*sys.exc_info())
+            _t, v, _tb = sys.exc_info()
+            raise v
 
         CRLogger.debug = log_err
         CRLogger.exception = log_err

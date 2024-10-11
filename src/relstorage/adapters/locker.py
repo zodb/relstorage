@@ -20,7 +20,6 @@ from __future__ import print_function
 
 import abc
 import sys
-import six
 
 
 from relstorage._compat import ABC
@@ -277,10 +276,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         val = kind(message)
         val.__relstorage_cause__ = v
         del v
-        six.reraise(
-            kind,
-            val,
-            sys.exc_info()[2])
+        raise val.with_traceback(sys.exc_info()[2])
 
     # MySQL allows aggregates in the top level to use FOR UPDATE,
     # but PostgreSQL does not, so we have to use the second form.
