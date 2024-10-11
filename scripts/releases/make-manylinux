@@ -22,10 +22,10 @@ export PIP_NO_WARN_SCRIPT_LOCATION=1
 
 # Build configuration.
 
-export CC="ccache gcc"
-export CXX="ccache g++"
-export LDCXXSHARED="ccache g++ -shared"
-export LDSHARED="ccache gcc -shared"
+export CC="ccache $(which cc)"
+export CXX="ccache $(which c++)"
+export LDCXXSHARED="ccache $(which c++) -shared"
+export LDSHARED="ccache $(which cc) -shared"
 export CCACHE_NOCPP2=true
 export CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
 export CCACHE_NOHASHDIR=true
@@ -91,7 +91,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
             echo Installing epel
             rpm -Uvh https://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm || true
         fi
-        yum -y install ccache || export CC=gcc LDSHARED="gcc -shared" LDCXXSHARED="gcc -shared"
+        yum -y install ccache || export CC=gcc CXX=c++ LDSHARED="gcc -shared" LDCXXSHARED="gcc -shared"
     fi
     if [ -e /sbin/apk ]; then
         # musllinux
@@ -108,6 +108,12 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     ls -l /opt/python
     for variant in `ls -d /opt/python/cp{312,39,310,311,313}*`; do
         echo "Building $variant"
+        if [ "$variant" = "/opt/python/cp313-cp313t" ]; then
+            # It appears that Cython 3.0.11 cannot produce code that
+            # works here. Lots of compiler errors.
+            echo "Unable to build without gil"
+            continue
+        fi
         mkdir /tmp/build
         cd /tmp/build
         git clone /RelStorage RelStorage
