@@ -98,6 +98,10 @@ if [ -d /RelStorage -a -d /opt/python ]; then
         apk add ccache
     fi
 
+    # Ahh, overprotective security. Disable it.
+    echo "Fixing git's paranoia"
+    git config --global --add safe.directory /RelStorage/.git
+
     cd /RelStorage
     rm -rf wheelhouse
     mkdir wheelhouse
