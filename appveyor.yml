@@ -76,7 +76,7 @@ install:
   - ps: "ls \"C:/\""
   - ps: "ls \"C:/Program Files/\""
   - ps: "ls \"C:/Program Files/MySQL\""
-  - ps: "Get-ChildItem -Path \"C:/Program Files/PostgreSQL\" -Recurse"
+  - ps: "ls \"C:/Program Files/PostgreSQL\""
   - ps: "ls \"C:/Program Files (x86)/\""
 
   - ECHO "Installed SDKs:"
@@ -100,7 +100,8 @@ install:
         & scripts\install.ps1;
       }
 
-  - "SET PATH=C:\\Program Files\\PostgreSQL\\10\\bin;C:\\Program Files\\MySql\\MySQL Server 8.0\\bin;%PATH%"
+  # If commands start failing, like psql isn't found, tweak the PATH here.
+  - "SET PATH=C:\\Program Files\\PostgreSQL\\13\\bin;C:\\Program Files\\MySql\\MySQL Server 8.0\\bin;%PATH%"
   - "SET PATH=%PYTHON%;%PYTHON%\\Scripts;%PYTHON%\\bin;%PATH%"
   - "SET PYEXE=%PYTHON%\\%PYTHON_EXE%.exe"
 
