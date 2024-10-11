@@ -86,6 +86,7 @@ class OracleAdapter(AbstractAdapter):
         twophase = self._twophase
         options = self.options
         dsn = self._dsn
+        inputsizes = None
 
         batcher_factory = lambda cursor, row_limit=None: OracleRowBatcher(
             cursor, inputsizes, row_limit

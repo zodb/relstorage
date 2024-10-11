@@ -594,8 +594,7 @@ class RelStorage(LegacyMethodsMixin,
         # at least so it seems. So here we make sure to have the cursor open.
         getattr(self._load_connection, 'cursor')
         with self._load_connection.server_side_cursor() as ss_cursor:
-            for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
-                yield record
+            yield from self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int)
 
     def record_iternext(self, next=None): # pylint:disable=redefined-builtin
         """

@@ -459,8 +459,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             def select_from(self, *args, **kwargs):
                 # pylint:disable=signature-differs
                 try:
-                    for x in RowBatcher.select_from(self, *args, **kwargs):
-                        yield x
+                    yield from RowBatcher.select_from(self, *args, **kwargs)
                 except AggregateOperationTimeoutError as ex:
                     MockRowBatcher.ex = ex
                     raise

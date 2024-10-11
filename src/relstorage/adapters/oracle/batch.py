@@ -49,7 +49,7 @@ class OracleRowBatcher(RowBatcher):
             new_name = '%s_%d' % (name, rownum) # pylint:disable=used-before-assignment
             if name in self.inputsizes:
                 stmt_inputsizes[new_name] = self.inputsizes[name]
-            params[new_name] = row[name]
+            params[new_name] = row[name] # pylint:disable=possibly-used-before-assignment
             return ':%s' % new_name
 
         items = sorted(self.inserts.items())
