@@ -12,6 +12,7 @@
 - Stop relying on an undeclared dependency on ``six``. See
   :issue:`504`.
 - Drop support for Python 3.8.
+- Add support for Python 3.13.
 
 4.0.0 (2023-12-11)
 ==================

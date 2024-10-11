@@ -36,9 +36,13 @@ environment:
 
     # Fully supported 64-bit versions, with testing. This should be
     # all the current (non EOL) versions.
+    - PYTHON: "C:\\Python313-x64"
+      PYTHON_VERSION: "3.13.0"
+      PYTHON_ARCH: "64"
+      PYTHON_EXE: python
 
     - PYTHON: "C:\\Python312-x64"
-      PYTHON_VERSION: "3.12.0b4"
+      PYTHON_VERSION: "3.12.0"
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
 
@@ -57,24 +61,14 @@ environment:
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
 
-    - PYTHON: "C:\\Python38-x64"
-      PYTHON_VERSION: "3.8.x"
-      PYTHON_ARCH: "64"
-      PYTHON_EXE: python
 
-    ## 32-bit, wheel only (no testing)
-
-    - PYTHON: "C:\\Python38"
-      PYTHON_VERSION: "3.8.x"
-      PYTHON_ARCH: "32"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
 
 # The images have moved to MySQL8 only, and that cannot
 # currently (Dec 2023) be started with the services: syntax.
 # See https://github.com/appveyor/ci/issues/3834
 services:
-  - postgresql101
+  - postgresql13
+
 
 install:
   - ECHO "Filesystem root:"
