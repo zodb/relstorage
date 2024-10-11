@@ -37,12 +37,10 @@ environment:
     # Fully supported 64-bit versions, with testing. This should be
     # all the current (non EOL) versions.
 
-    # 2024-10-11: Awaiting release of psycopg 2.9.10; current
-    # release won't build on Py 3.13
-    # - PYTHON: "C:\\Python313-x64"
-    #   PYTHON_VERSION: "3.13.0"
-    #   PYTHON_ARCH: "64"
-    #   PYTHON_EXE: python
+    - PYTHON: "C:\\Python313-x64"
+      PYTHON_VERSION: "3.13.0"
+      PYTHON_ARCH: "64"
+      PYTHON_EXE: python
 
     - PYTHON: "C:\\Python312-x64"
       PYTHON_VERSION: "3.12.0"
