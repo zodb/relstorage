@@ -18,7 +18,7 @@ RelStorage 3
 
 RelStorage 3 performance is substantially improved on many benchmarks.
 See `this post
-<https://dev.nextthought.com/blog/2019/11/relstorage-30.html#performance-improvements>`_
+<https://seecoresoftware.com/blog/2019/11/relstorage-30.html#performance-improvements>`_
 for details.
 
 RelStorage 2.1a1 vs RelStorage 2.0
