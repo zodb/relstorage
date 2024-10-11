@@ -276,8 +276,7 @@ class MockCursor(object):
         self.closed = True
 
     def __iter__(self):
-        for row in self.results:
-            yield row
+        yield from self.results
 
 class MockOptions(Options):
     cache_module_name = '' # disable

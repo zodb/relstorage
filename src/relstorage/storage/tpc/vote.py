@@ -534,6 +534,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             raise StorageTransactionError(
                 "tpc_finish called with wrong transaction")
         try:
+            locks_released = 0
             finish_entry = _time()
             # Handle the finishing. We cannot/must not fail now.
             # TODO: Move most of this into the Finish class/module.

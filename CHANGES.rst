@@ -9,7 +9,10 @@
   to support newer compilers like GCC 13.
 - Compile in C++ 11 mode instead of whatever the compiler default was
   (sometimes C++ 03), because the latter is deprecated by Boost.
-
+- Stop relying on an undeclared dependency on ``six``. See
+  :issue:`504`.
+- Drop support for Python 3.8.
+- Add support for Python 3.13.
 
 4.0.0 (2023-12-11)
 ==================

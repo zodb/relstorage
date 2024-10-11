@@ -154,6 +154,18 @@ class TestBlobCacheMixin(TestBlobMixin):
 
 
     def test_many_clients(self):
+        # pylint:disable=protected-access
+        if sys.version_info[:2] == (3, 13) \
+           and self.blob_storage._adapter.connmanager.driver.__name__ == 'gevent MySQLdb' \
+           and RUNNING_ON_CI:
+            raise self.skipTest(
+                """
+                Every verification attempt produces
+                OperationalError(2013, 'Lost connection to MySQL server during query').
+                It is not clear where the error lies, gevent or mysqlclient, but
+                it shouldn't be here.
+                """
+            )
         # Now let see if we can stress things a bit.  We'll create many clients
         # and get them to pound on the blobs all at once to see if we can
         # provoke problems:

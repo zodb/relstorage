@@ -197,8 +197,7 @@ class RowBatcher(object): # pylint:disable=too-many-instance-attributes
                 timeout,
                 kw
         ):
-            for row in cursor.fetchall():
-                yield row
+            yield from cursor.fetchall()
 
     def update_set_static(self, update_set, timeout=None,
                           batch_done_callback=lambda total_count: None,

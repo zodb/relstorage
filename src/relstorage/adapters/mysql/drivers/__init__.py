@@ -135,8 +135,7 @@ class IterateFetchmanyMixin(object):
         sleep = self.sleep
         batch = fetch()
         while batch:
-            for row in batch:
-                yield row
+            yield from batch
             if sleep is not None:
                 sleep() # pylint:disable=not-callable
             batch = fetch()

@@ -212,7 +212,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
 
         # Now pack the destination.
         from ZODB.utils import u64 as bytes8_to_int64
-        if IRelStorage.providedBy(self._dst):
+        if IRelStorage.providedBy(self._dst): # pylint:disable=no-value-for-parameter
             packtime = bytes8_to_int64(storage_last_tid)
         else:
             from persistent.timestamp import TimeStamp

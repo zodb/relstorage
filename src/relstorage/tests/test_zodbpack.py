@@ -103,7 +103,7 @@ class ZODBPackScriptTests(unittest.TestCase):
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(ZODBPackScriptTests))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(ZODBPackScriptTests))
     return suite
 
 if __name__ == '__main__':

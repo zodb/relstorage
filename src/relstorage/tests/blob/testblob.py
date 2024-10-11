@@ -597,7 +597,7 @@ def storage_reusable_suite(prefix, factory,
         )
         new_class.__module__ = klass.__module__
         new_class = unittest.skipUnless(storage_is_available, str(storage_is_available))(new_class)
-        suite.addTest(unittest.makeSuite(new_class))
+        suite.addTest(unittest.TestLoader().loadTestsFromTestCase(new_class))
 
     add_test_based_on_test_class(TestBlobTransaction)
     add_test_based_on_test_class(TestBlobImportExport)

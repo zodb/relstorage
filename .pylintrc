@@ -75,7 +75,7 @@ init-hook =
 # comments at the end of the line does the same thing (though Py3 supports
 # mixing)
 
-
+# too-many-positional-arguments: we inherit most of these and can't do anything about them.
 # invalid-name, ; We get lots of these, especially in scripts. should fix many of them
 # protected-access, ; We have many cases of this; legit ones need to be examinid and commented, then this removed
 # no-self-use, ; common in superclasses with extension points
@@ -146,7 +146,8 @@ disable=wrong-import-position,
     missing-param-doc,
     differing-param-doc,
     differing-type-doc,
-    compare-to-zero
+    compare-to-zero,
+    too-many-positional-arguments
 
 enable=consider-using-augmented-assign
 

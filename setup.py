@@ -169,17 +169,17 @@ setup(
     platforms=["any"],
     description="A backend for ZODB that stores pickles in a relational database.",
     # 3.8: importlib.metadata
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     classifiers=[
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Zope Public License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Database",
@@ -298,16 +298,18 @@ setup(
         # and the authors specifically request that other modules not depend on
         # psycopg2-binary.
         # See http://initd.org/psycopg/docs/install.html#binary-packages
-        'postgresql: platform_python_implementation == "CPython"': [
+        'postgresql: platform_python_implementation == "CPython" and python_version != "3.13"' : [
             # 2.4.1+ is required for proper bytea handling;
             # 2.6+ is needed for 64-bit lobject support;
             # 2.7+ is needed for Python 3.7 support and PostgreSQL 10+;
             # 2.7.6+ is needed for PostgreSQL 11;
             # 2.8 is needed for conn.info
+            # 2.9.10 will be needed for Python 3.13, but it's not out yet.
             'psycopg2 >= 2.8.3',
         ],
-        'postgresql: platform_python_implementation == "CPython" and python_version == "3.12"': [
-            # psycopg2 isn't importing on Appveyor/3.12b4.
+        'postgresql: platform_python_implementation == "CPython" and python_version == "3.13"': [
+            # psycopg2 2.9.10 is needed, but not available yet.
+            # See also 'all tested drivers'
             'pg8000',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
@@ -353,11 +355,11 @@ setup(
             # pure-python
             # pg8000
             # This requirement is repeated in the driver class.
-            'pg8000 >= 1.29.0; python_version == "3.11"',
+            'pg8000 >= 1.29.0; python_version == "3.11" or python_version == "3.13"',
             # CFFI, runs on all implementations.
             'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
-            'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
+            'psycopg2 >= 2.8.3; platform_python_implementation == "CPython" and python_version != "3.13"',
         ],
     },
     entry_points={

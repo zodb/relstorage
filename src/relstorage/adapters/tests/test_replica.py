@@ -129,7 +129,7 @@ class ReplicaSelectorTests(unittest.TestCase):
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(ReplicaSelectorTests))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(ReplicaSelectorTests))
     return suite
 
 if __name__ == '__main__':

@@ -480,6 +480,9 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         return getattr(adapter, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
 
     def __maybe_ignore_monotonic(self, cls, method_name):
+        if not hasattr(super(), method_name):
+            raise unittest.SkipTest('Method ' + method_name + ' not available')
+
         if not self.__tid_clock_needs_care():
             return getattr(super(), method_name)()
 
@@ -523,6 +526,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                       'checkLoadBeforeOld')
 
     def checkSimpleHistory(self):
+        if not hasattr(super(), 'checkSimpleHistory'):
+            raise unittest.SkipTest('No test checkSimpleHistory')
         if not self.__tid_clock_needs_care():
             return super().checkSimpleHistory() # pylint:disable=no-member
         # This assumes that the `time` value in the storage.history()
@@ -605,7 +610,10 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                               find_packtime):
         # Ignore the pack timestamp given. Execute `find_packtime(storage)`
         # instead and use that.
-        meth = getattr(super(), methname)
+        try:
+            meth = getattr(super(), methname)
+        except AttributeError:
+            raise unittest.SkipTest('No method ' + methname) from None
         if not self.__tid_clock_needs_care():
             return meth()
 
