@@ -155,9 +155,6 @@ class TestBlobCacheMixin(TestBlobMixin):
 
     def test_many_clients(self):
         # pylint:disable=protected-access
-        print()
-        print('Test many clients', self.blob_storage._adapter.connmanager.driver.__name__)
-        print()
         if sys.version_info[:2] == (3, 13) \
            and self.blob_storage._adapter.connmanager.driver.__name__ == 'gevent MySQLdb' \
            and RUNNING_ON_CI:
