@@ -2,7 +2,7 @@
  Changes
 =========
 
-4.1.0 (unreleased)
+4.1.0 (2024-10-11)
 ==================
 
 - Update the bundled version of the Boost libraries from 1.75 to 1.83
