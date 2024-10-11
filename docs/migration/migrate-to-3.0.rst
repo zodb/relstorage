@@ -5,7 +5,7 @@
 A small migration is necessary for all schemas. It is accomplished
 automatically the first time RelStorage 3.0 is used. See `the release
 announcement
-<https://dev.nextthought.com/blog/2019/11/relstorage-30.html>`_ for
+<https://seecoresoftware.com/blog/2019/11/relstorage-30.html>`_ for
 details.
 
 Oracle
