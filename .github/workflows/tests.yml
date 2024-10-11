@@ -102,7 +102,7 @@ jobs:
           # persistent wheel, we have to exclude that one.
           # The same thing goes for PyPy.
           - os: ubuntu-latest
-            python-version: pypy-3.10
+            python-version: "pypy-3.10-v7.3.17"
 
     steps:
       - name: checkout
