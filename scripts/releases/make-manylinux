@@ -102,7 +102,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     rm -rf wheelhouse
     mkdir wheelhouse
     ls -l /opt/python
-    for variant in `ls -d /opt/python/cp{312,38,39,310,311}*`; do
+    for variant in `ls -d /opt/python/cp{312,39,310,311,313}*`; do
         echo "Building $variant"
         mkdir /tmp/build
         cd /tmp/build
