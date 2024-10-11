@@ -103,7 +103,7 @@ class TestNoOp(unittest.TestCase):
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(TestNoOp))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestNoOp))
     return suite
 
 if __name__ == '__main__':

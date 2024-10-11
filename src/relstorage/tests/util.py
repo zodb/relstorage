@@ -231,7 +231,7 @@ class AbstractTestSuiteBuilder(object):
         from .reltestbase import AbstractIDBOptionsTest
 
         suite = unittest.TestSuite()
-        suite.addTest(unittest.makeSuite(type(
+        suite.addTest(unittest.TestLoader().loadTestsFromTestCase(type(
             self.__name__ + 'DBOptionsTest',
             (AbstractIDBOptionsTest,),
             {'db_options': self.drivers}
@@ -245,7 +245,7 @@ class AbstractTestSuiteBuilder(object):
             )
             # Checking the driver is just a unit test, it doesn't connect or
             # need a layer
-            suite.addTest(unittest.makeSuite(
+            suite.addTest(unittest.TestLoader().loadTestsFromTestCase(
                 self.__skipping_if_not_available(
                     type(
                         self.__name__ + 'DBDriverTest_' + available.escaped_driver_name,
@@ -403,19 +403,21 @@ class AbstractTestSuiteBuilder(object):
         # pylint:disable=too-many-locals
         for klass in self._make_check_classes():
             klass = self._new_class_for_driver(klass, driver_available)
-            suite.addTest(unittest.makeSuite(klass, "check"))
+            loader = unittest.TestLoader()
+            loader.testMethodPrefix = 'check'
+            suite.addTest(loader.loadTestsFromTestCase(klass))
 
         for klass in self._make_test_classes():
             klass = self._new_class_for_driver(klass, driver_available)
-            suite.addTest(unittest.makeSuite(klass))
+            suite.addTest(unittest.TestLoader().loadTestsFromTestCase(klass))
 
         for klass in self._make_zodbconvert_classes():
-            suite.addTest(unittest.makeSuite(
+            suite.addTest(unittest.TestLoader().loadTestsFromTestCase(
                 self._new_class_for_driver(klass,
                                            driver_available)))
 
         for klass in self.extra_test_classes:
-            suite.addTest(unittest.makeSuite(
+            suite.addTest(unittest.TestLoader().loadTestsFromTestCase(
                 self._new_class_for_driver(klass,
                                            driver_available)))
 

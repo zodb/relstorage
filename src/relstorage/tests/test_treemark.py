@@ -87,7 +87,7 @@ class TestTreeMarker(unittest.TestCase):
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(TestTreeMarker))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(TestTreeMarker))
     return suite
 
 if __name__ == '__main__':

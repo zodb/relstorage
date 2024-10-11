@@ -468,8 +468,8 @@ class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(FSZODBConvertTests))
-    suite.addTest(unittest.makeSuite(ZlibWrappedFSZODBConvertTests))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(FSZODBConvertTests))
+    suite.addTest(unittest.TestLoader().loadTestsFromTestCase(ZlibWrappedFSZODBConvertTests))
     return suite
 
 if __name__ == '__main__':

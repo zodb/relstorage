@@ -162,7 +162,7 @@ def test_suite():
             @unittest.skip("ZEO not installed")
             def test_cache_trace_analysis(self):
                 "Does nothing"
-        suite.addTest(unittest.makeSuite(NoTest))
+        suite.addTest(unittest.TestLoader().loadTestsFromTestCase(NoTest))
     else:
         suite.addTest(
             doctest.DocFileSuite(
