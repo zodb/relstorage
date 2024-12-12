@@ -5,7 +5,10 @@
 4.1.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Make certain lock-related errors in very large transactions no
+  longer produce huge (unusable) error messages when logged or
+  printed. Now such messages are truncated. Previously, they were
+  allowed to grow without bounds. See :issue:`511`
 
 
 4.1.0 (2024-10-11)

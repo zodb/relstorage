@@ -155,6 +155,10 @@ class _AbstractTPCTemporaryStorage(object):
         )
 
     def __str__(self):
+        """
+        The string of this object can get very, very long, if the transaction
+        modifies a lot of objects.
+        """
         base = repr(self)
         if not self:
             return base

@@ -18,11 +18,9 @@ The implementation of locking the database for commit, flushing
 temporary objects to the database, and moving them to their final locations,
 live here.
 """
-from __future__ import absolute_import
-from __future__ import print_function
 
 import time
-from logging import DEBUG
+import logging
 
 from zope.interface import implementer
 
@@ -37,6 +35,7 @@ from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from relstorage._util import TRACE
 from relstorage._util import METRIC_SAMPLE_RATE
+from relstorage._util import get_positive_integer_from_environ
 from relstorage.options import COMMIT_EXIT_CRITICAL_SECTION_EARLY
 from relstorage.adapters.interfaces import UnableToAcquireLockError
 from ..interfaces import VoteReadConflictError
@@ -46,9 +45,9 @@ from . import LOCK_EARLY
 from . import AbstractTPCStateDatabaseAvailable
 from .finish import Finish
 
-LOG_LEVEL_TID = DEBUG
+LOG_LEVEL_TID = logging.DEBUG
 
-logger = __import__('logging').getLogger(__name__)
+logger = logging.getLogger(__name__)
 perf_logger = logger.getChild('timing')
 
 class DatabaseLockedForTid(object):
@@ -663,14 +662,36 @@ class _CachedConflictResolver(ConflictResolvingStorage):
         assert bytes8_to_int64(serial) == tid
         return state
 
+#: The maximum number of characters to allow in each portion
+#: of lock detail errors.
+DETAIL_TRUNCATION_LEN = get_positive_integer_from_environ(
+    'RS_LOCK_ERROR_MAX_LEN',
+    # 2k seems a reasonable default. If you are actually getting
+    # truncated, then chances are the transaction is much larger
+    # than that
+    2048,
+    logger=logger
+)
+
 def add_details_to_lock_error(ex, shared_state, required_tids):
     # type: (Exception, SharedState, required_tids)
+
+    obj_msg = str(shared_state.temp_storage) if shared_state.has_temp_data() else 'None'
+    tid_msg = str(dict(required_tids)) # May be a BTree, which has no useful str/repr
+
+    obj_msg = (obj_msg[:DETAIL_TRUNCATION_LEN] + '...'
+               if len(obj_msg) > DETAIL_TRUNCATION_LEN
+               else obj_msg)
+    tid_msg = (tid_msg[:DETAIL_TRUNCATION_LEN] + '...'
+               if len(tid_msg) > DETAIL_TRUNCATION_LEN
+               else tid_msg)
+
     message = '\n'.join((
-            'Stored Objects',
-            str(shared_state.temp_storage) if shared_state.has_temp_data() else 'None',
-            'readCurrent {oid: tid}',
-            str(dict(required_tids)) # May be a BTree, which has no
-        ))
+        'Stored Objects',
+        obj_msg,
+        'readCurrent {oid: tid}',
+        tid_msg,
+    ))
 
     if hasattr(ex, 'message'):
         # A ConflictError subclass *or* we're on Python 2.

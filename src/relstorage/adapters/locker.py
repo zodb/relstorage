@@ -254,9 +254,10 @@ class AbstractLocker(DatabaseHelpersMixin,
         return kind
 
     def reraise_commit_lock_error(self, cursor, lock_stmt, kind):
-        v = sys.exc_info()[1]
-        kind = self._modify_commit_lock_kind(kind, v)
-        if self.driver.exception_is_deadlock(v):
+        _current_exc_type, current_exc, current_tb = sys.exc_info()
+
+        kind = self._modify_commit_lock_kind(kind, current_exc)
+        if self.driver.exception_is_deadlock(current_exc):
             kind = getattr(kind, 'DEADLOCK_VARIANT', UnableToLockRowsDeadlockError)
 
         try:
@@ -270,13 +271,15 @@ class AbstractLocker(DatabaseHelpersMixin,
             logger.debug("Failed to acquire commit lock:\n%s", debug_info)
 
         message = "Acquiring a lock during commit failed: %s%s" % (
-            sys.exc_info()[1],
+            current_exc,
             '\n' + debug_info if debug_info else '(No debug info.)'
         )
         val = kind(message)
-        val.__relstorage_cause__ = v
-        del v
-        raise val.with_traceback(sys.exc_info()[2])
+        val.__relstorage_cause__ = current_exc
+        try:
+            raise val.with_traceback(current_tb) from current_exc
+        finally:
+            del current_exc, current_tb
 
     # MySQL allows aggregates in the top level to use FOR UPDATE,
     # but PostgreSQL does not, so we have to use the second form.
@@ -342,6 +345,8 @@ class AbstractLocker(DatabaseHelpersMixin,
         that will be added to the exception message when a commit lock cannot
         be acquired. For example, it might list other connections that
         have conflicting locks.
+
+        :rtype: str
         """
         return ''
 

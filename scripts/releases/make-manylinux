@@ -8,10 +8,7 @@ export PYTHONDONTWRITEBYTECODE=1
 
 # Use a fixed hash seed for reproducability
 export PYTHONHASHSEED=8675309
-# Disable tests that use external network resources;
-# too often we get failures to resolve DNS names or failures
-# to connect on AppVeyor.
-export GEVENTTEST_USE_RESOURCES="-network"
+
 export CI=1
 export TRAVIS=true
 export GEVENT_MANYLINUX=1
@@ -21,49 +18,19 @@ export PIP_NO_PYTHON_VERSION_WARNING=1
 export PIP_NO_WARN_SCRIPT_LOCATION=1
 
 # Build configuration.
-
-export CC="ccache $(which cc)"
-export CXX="ccache $(which c++)"
-export LDCXXSHARED="ccache $(which c++) -shared"
-export LDSHARED="ccache $(which cc) -shared"
-export CCACHE_NOCPP2=true
-export CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
-export CCACHE_NOHASHDIR=true
-export CCACHE_BASEDIR="/RelStorage"
 export CFLAGS="-pipe -O3"
 export CXXFLAGS="-pipe -O3"
 export BUILD_LIBS=$HOME/.libs
-# Share the ccache directory
-export CCACHE_DIR="/ccache"
 
-# Disable some warnings produced by libev especially and also some Cython generated code.
-# Note that changing the value of these variables invalidates configure caches
-SLOW_BUILD=''
-# Some images/archs (specificaly 2014_aarch64) don't have ccache;
-# This also seems to have vanished for manylinux_2010 x64/64 after November 30
-# 2020 when the OS went EOL and the package repos switched to the "vault"
-NEED_CCACHE=1
-GEVENT_WARNFLAGS="-Wno-strict-aliasing -Wno-comment -Wno-unused-value -Wno-unused-but-set-variable -Wno-sign-compare -Wno-parentheses -Wno-unused-function -Wno-tautological-compare -Wno-strict-prototypes -Wno-return-type -Wno-misleading-indentation"
-OPTIMIZATION_FLAGS="-pipe"
-if [ -n "$GITHUB_ACTIONS" ]; then
-    if [ "$DOCKER_IMAGE" == "quay.io/pypa/manylinux2014_aarch64" ] || [ "$DOCKER_IMAGE" == "quay.io/pypa/manylinux2014_ppc64le" ] || [ "$DOCKER_IMAGE" == "quay.io/pypa/manylinux2014_s390x" ] ||  [ "$DOCKER_IMAGE" == "quay.io/pypa/musllinux_1_1_aarch64" ] ; then
-        # Compiling with -Ofast is a no-go because of the regression it causes (#1864).
-        # The default settings have -O3, and adding -Os doesn't help much. So maybe -O1 will.
-        echo "Compiling with -O1"
-        OPTIMIZATION_FLAGS="-pipe -O1"
-        SLOW_BUILD=1
-        NEED_CCACHE=1
-    fi
-else
-    echo "Compiling with -O3"
-    OPTIMIZATION_FLAGS="-pipe -O3"
-    NEED_CCACHE=1
-fi
+WARNFLAGS="-Wno-strict-aliasing -Wno-comment -Wno-unused-value -Wno-unused-but-set-variable -Wno-sign-compare -Wno-parentheses -Wno-unused-function -Wno-tautological-compare -Wno-return-type -Wno-misleading-indentation"
+OPTIMIZATION_FLAGS="-pipe -O3"
 
-export CFLAGS="$OPTIMIZATION_FLAGS $GEVENT_WARNFLAGS"
+
+
+export CFLAGS="$OPTIMIZATION_FLAGS $WARNFLAGS"
 export CXXFLAGS="$CFLAGS"
 
-if [ -d /RelStorage -a -d /opt/python ]; then
+if [ -d /RelStorage ] && [ -d /opt/python ]; then
     # Running inside docker
 
     # Set a cache directory for pip. This was
@@ -82,21 +49,6 @@ if [ -d /RelStorage -a -d /opt/python ]; then
     mkdir -p /cache/pip
     ls -ld /cache/pip
 
-    if [ -e /usr/bin/yum ]; then
-        # manylinux
-
-        if [ -n "$NEED_CCACHE" ] ; then
-            # This provides access to ccache for the 2014 image; it is already installed in the
-            # s390x image.
-            echo Installing epel
-            rpm -Uvh https://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm || true
-        fi
-        yum -y install ccache || export CC=gcc CXX=c++ LDSHARED="gcc -shared" LDCXXSHARED="gcc -shared"
-    fi
-    if [ -e /sbin/apk ]; then
-        # musllinux
-        apk add ccache
-    fi
 
     # Ahh, overprotective security. Disable it.
     echo "Fixing git's paranoia"
