@@ -3,12 +3,9 @@
 Tests for vote.py.
 
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 
 import unittest
+from unittest.mock import patch as Patch
 
 from hamcrest import assert_that
 from nti.testing.matchers import verifiably_provides
@@ -227,7 +224,7 @@ class TestFunctions(unittest.TestCase):
         add_details_to_lock_error(ex, state, required_tids)
         return ex
 
-    def _check(self, kind):
+    def _check(self, kind, truncated=False):
         ex = kind('MESSAGE')
         storage = MockStorage()
         storage.keep_history = False # pylint:disable=attribute-defined-outside-init
@@ -237,9 +234,9 @@ class TestFunctions(unittest.TestCase):
         self._callFUT(ex, state, {1: 1})
         s = str(ex)
         self.assertIn('readCurrent {oid: tid}', s)
-        self.assertIn('{1: 1}', s)
-        self.assertIn('Previous TID', s)
-        self.assertIn('42', s)
+        self.assertIn('{1: 1}' if not truncated else '{...', s)
+        self.assertIn('Previous TID' if not truncated else '<...', s)
+        self.assertIn('42' if not truncated else '', s)
         self.assertIn('MESSAGE', s)
 
     def test_add_details_to_UnableToAcquireCommitLockError(self):
@@ -249,6 +246,12 @@ class TestFunctions(unittest.TestCase):
     def test_add_details_to_UnableToLockRowsToModifyError(self):
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
         self._check(UnableToLockRowsToModifyError)
+
+    def test_add_truncated_details_to_UnableToLockRowsToModifyError(self):
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        from .. import vote
+        with Patch.object(vote, 'DETAIL_TRUNCATION_LEN', new=1):
+            self._check(UnableToLockRowsToModifyError, truncated=True)
 
     def test_add_details_to_UnableToLockRowsToReadCurrentError(self):
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError

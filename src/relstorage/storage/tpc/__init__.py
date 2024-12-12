@@ -133,8 +133,8 @@ class SharedTPCState(object):
     def store_connection(self):
         conn = self._storage._store_connection_pool.borrow()
         # Report on the connection we will use.
-        # https://github.com/zodb/relstorage/issues/460
-        logger.info("Using store connection %s", conn)
+        #  https://github.com/zodb/relstorage/issues/460
+        logger.debug("Using store connection %s", conn)
         return conn
 
     @store_connection.aborter
