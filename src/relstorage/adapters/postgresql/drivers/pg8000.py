@@ -21,7 +21,6 @@ from zope.interface import implementer
 
 from relstorage._compat import number_types
 
-from ...._compat import WIN
 from ...interfaces import IDBDriver
 from ...sql import Compiler
 from . import AbstractPostgreSQLDriver
@@ -245,16 +244,9 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     def _get_exception_pgcode(self, exc):
         return exc.args[0]['C']
 
-    if WIN:
-        def exception_is_deadlock(self, exc):
-            is_deadlock = super().exception_is_deadlock(exc)
-            if is_deadlock:
-                return is_deadlock
-            # pg8000 raises pg8000.dbapi.ProgrammingError, which is a DatabaseError.
-            # We've seen both
-            #    40P01 - deadlock_detected (Transaction Rollback)
-            #    55P03 - lock_not_available (Object Not In Prerequisite State)
-            # ERRCODE_DEADLOCK is the first one, checked by super.
-            if isinstance(exc, self.driver_module.DatabaseError):
-                return self._get_exception_pgcode(exc) == '55P03'
-            return None
+    # pg8000 raises pg8000.dbapi.ProgrammingError, which is a DatabaseError.
+    # We've seen both
+    #    40P01 - deadlock_detected (Transaction Rollback)
+    #    55P03 - lock_not_available (Object Not In Prerequisite State)
+    # ERRCODE_DEADLOCK is the first one, checked by super.
+    # If we treat the other one like a deadlock, a bunch of tests break.
