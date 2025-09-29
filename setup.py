@@ -165,7 +165,7 @@ setup(
     packages=find_packages('src'),
     package_dir={'': 'src'},
     include_package_data=True,
-    license="ZPL 2.1",
+    license="ZPL-2.1",
     platforms=["any"],
     description="A backend for ZODB that stores pickles in a relational database.",
     # Bump to 3.10 or even 3.11 at next release. We'll have to make changes
@@ -174,7 +174,6 @@ setup(
     python_requires=">=3.9",
     classifiers=[
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: Zope Public License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3 :: Only",
         "Programming Language :: Python :: 3.9",
