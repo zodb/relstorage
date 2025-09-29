@@ -632,11 +632,15 @@ class TestLocking(TestCase):
         cond.wait(5)
         cond.release()
 
-        thread_locking_b.join(1)
-        thread_locking_c.join(1)
+        thread_locking_b.join(5)
+        thread_locking_c.join(5)
+
+        self.assertFalse(thread_locking_b.is_alive())
+        self.assertFalse(thread_locking_c.is_alive())
 
         # One or the other produced an error
-        self.assertTrue(bool(storageB.last_error) ^ bool(storageC.last_error))
+        self.assertTrue(bool(storageB.last_error) ^ bool(storageC.last_error),
+                        (storageB.last_error, storageC.last_error))
 
         # It is a deadlock error
         self.assertIsInstance(storageB.last_error or storageC.last_error,

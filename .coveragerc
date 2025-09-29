@@ -9,6 +9,13 @@ omit =
 # Probably not since we're now installing in non-editable mode.
 relative_files = True
 
+# In 7.9.1, the default trace engine changed to ``sys.monitoring``
+# for Python 3.14rc1+, but that breaks us when we test gevent (
+# where me manually pass the --concurrency=greenlet arg):
+#   ConfigError: Can't support concurrency=greenlet with SysMonitor, only threads
+# so force it to always be ctrace.
+core = ctrace
+
 [report]
 # Coverage is run on Linux under cPython 2 and 3,
 # against MySQL and PostgreSQL, so

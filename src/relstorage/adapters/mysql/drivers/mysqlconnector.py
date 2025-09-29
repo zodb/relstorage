@@ -45,9 +45,10 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     PRIORITY_PYPY = 2
     REQUIREMENTS = (
         # 8.0.32 changes character set handling,
-        # adds init_command
+        # adds init_command. 9.2.0 changed the
+        # handling of multiple result sets to be standard.
 
-        'mysql-connector-python >= 8.0.32',
+        'mysql-connector-python >= 9.2.0',
     )
 
 
@@ -196,16 +197,22 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         conn.autocommit = value
 
     def callproc_multi_result(self, cursor, proc, args=(), exit_critical_phase=False):
-        # This driver is weird, wants multi=True, returns an iterator of cursors
-        # instead of using nextset()
-        resultsets = cursor.execute("CALL " + proc, args, multi=True)
-        multi_results = []
-        for resultset in resultsets:
+        # Prior to 9.2.0, this driver is weird, requires
+        # ``execute(...,multi=True)``, returns an iterator of cursors
+        # instead of using nextset(). That's standardized in 9.2;
+        # our only difference now is checking for InterfaceError.
+        if exit_critical_phase:
+            self.exit_critical_phase(cursor.connection, cursor)
+
+        cursor.execute("CALL " + proc, args)
+        multi_results = [cursor.fetchall()]
+        while cursor.nextset():
             try:
-                multi_results.append(resultset.fetchall())
+                multi_results.append(cursor.fetchall())
             except self.driver_module.InterfaceError:
                 # This gets raised on the empty set at the end, for some reason.
                 # Ensure we put one there to be like the others
+                # TODO: Is this true for >= 9.2?
                 multi_results.append(())
                 break
         return multi_results

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Script to run zope.testrunner in a gevent monkey-patched environment.
@@ -9,10 +10,6 @@ monkey-patcher patches the spawned process. The net effect is that the gevent
 threadpool isn't functional.
 
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import gevent.monkey
 gevent.monkey.patch_all()
 # pylint:disable=wrong-import-position, wrong-import-order

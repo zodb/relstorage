@@ -11,9 +11,6 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import
-from __future__ import print_function
-
 import functools
 import gc
 import os
@@ -384,6 +381,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         fd, cfgfile = tempfile.mkstemp('.conf', 'zodbconvert-')
         os.write(fd, cfg.encode('ascii'))
         os.close(fd)
+        self.assertTrue(os.path.exists(cfgfile), cfgfile)
         return cfgfile
 
     def tearDown(self):
@@ -412,9 +410,19 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         from relstorage.zodbconvert import schema_xml
         from relstorage.zodbconvert import StringIO
         import ZConfig
+        __traceback_info__ = self.cfgfile
 
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        conf, _ = ZConfig.loadConfig(schema, self.cfgfile)
+
+        self.assertTrue(os.path.exists(self.cfgfile), self.cfgfile)
+        with open(self.cfgfile, 'rt', encoding='utf-8') as f:
+            # loadConfig() takes a *URL*, not a path; under the covers, it
+            # calls ``urllib.request.urlopen``. Prior to 3.14, passing
+            # a path to this function worked fine everywhere. In 3.14,
+            # they broke this on Windows, and it now complains
+            # "Can't open network file \\\\c:\...". So do it for them.
+            conf, _ = ZConfig.loadConfigFile(schema, f)
+
         return conf
 
     def _create_src_storage(self):
@@ -432,6 +440,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         db = DB(src)  # add the root object
         db.close()
         self.assertTrue(storage_has_data(src))
+
 
 class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
 

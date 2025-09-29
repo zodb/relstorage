@@ -150,7 +150,8 @@ class TestAbstractModuleDriver(unittest.TestCase):
             REQUIREMENTS = (
                 # Guaranteed to have this. We didn't put a version
                 # on it, so it will always work.
-                MODULE_NAME,
+                # Note we're using the normalized distribution name here.
+                'zope-interface',
             )
 
         d = Driver.__new__(Driver)
@@ -159,7 +160,7 @@ class TestAbstractModuleDriver(unittest.TestCase):
 
         # Multiple
         d.REQUIREMENTS = (
-            'zope.interface > 1, != 2',
+            'zope-interface > 1, != 2',
             'ZODB'
         )
         mod = d._check_preconditions()

@@ -62,7 +62,7 @@ driver
       This is the `official client
       <https://dev.mysql.com/doc/connector-python/en/>`_ built by
       Oracle and distributed as `mysql-connector-python on PyPI
-      <https://pypi.org/project/mysql-connector-python/8.0.17/#files>`_.
+      <https://pypi.org/project/mysql-connector-python/9.4.0/#files>`_.
 
       It has an optional C extension. The C extension (which uses the
       MySQL client libraries) performs about as well as mysqlclient,
