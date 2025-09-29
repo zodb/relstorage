@@ -13,6 +13,9 @@
 
 - Include ``psycopg2`` in the ``postgresql`` extra on CPython 3.13+.
   See :issue:`515`.
+- Increase the minimum supported version of ``mysql-connector-python``
+  from 8.0.32 to 9.2.0.
+
 
 4.1.1 (2024-12-12)
 ==================

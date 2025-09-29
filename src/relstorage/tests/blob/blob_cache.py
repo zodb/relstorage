@@ -17,9 +17,6 @@ non-shared
 This test is only for the non-shared (aka, "cached") case.
 
 """
-from __future__ import absolute_import
-from __future__ import print_function
-
 import sys
 import threading
 import traceback
@@ -57,15 +54,19 @@ class TestBlobCacheMixin(TestBlobMixin):
     def setUp(self):
         # and don't actually use native threads in gevent mode. They can't be
         # waited on which makes this test racy.
-
         from relstorage.blobhelper import cached
         from relstorage._util import thread_spawn
+        from relstorage._util import spawn as native_thread_spawn
         assert cached.native_thread_spawn is not thread_spawn
         cached.native_thread_spawn = thread_spawn
 
-        super().setUp()
-        # We're going to wait for any threads we started to finish, so...
-        self._old_threads = list(threading.enumerate())
+        try:
+            super().setUp()
+            # We're going to wait for any threads we started to finish, so...
+            self._old_threads = list(threading.enumerate())
+        except:
+            cached.native_thread_spawn = native_thread_spawn
+            raise
 
     def _wait_for_all_spawned_threads_to_finish(self):
         # pylint:disable=method-hidden
