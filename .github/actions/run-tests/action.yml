@@ -14,8 +14,7 @@ runs:
   steps:
     - name: Test gevent concurrency
       shell: bash
-      # Do we need to test this on macOS? At this writing, that's the only platform
-      # we're testing 3.12 on, and gevent isn't out yet for 3.12.
+      # See also .coveragerc because we force the tracer.
       if: startsWith(runner.os, 'Linux')
       run: |
         echo "Using coverage? ${{ inputs.useCoverage }}"

@@ -182,6 +182,7 @@ setup(
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Database",
@@ -357,6 +358,9 @@ setup(
             'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
             'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
+            # However, at this writing, psycopg2 2.9.10, even though it can be built
+            # for 3.14rc1 cannot be imported on that version. We may need to add a
+            # fallback here.
         ],
     },
     entry_points={
