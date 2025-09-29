@@ -2,11 +2,17 @@
  Changes
 =========
 
-4.1.2 (unreleased)
+4.3.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Add support for Python 3.14.
 
+  .. note::
+
+     This will be the last RelStorage release to support Python 3.9.
+
+- Include ``psycopg2`` in the ``postgresql`` extra on CPython 3.13+.
+  See :issue:`515`.
 
 4.1.1 (2024-12-12)
 ==================
