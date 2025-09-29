@@ -360,6 +360,7 @@ setup(
             # However, at this writing, psycopg2 2.9.10, even though it can be built
             # for 3.14rc1 cannot be imported on that version. We may need to add a
             # fallback here.
+            'pg8000 >= 1.29.0; python_version == "3.14" and sys_platform == "win32"',
         ],
     },
     entry_points={
