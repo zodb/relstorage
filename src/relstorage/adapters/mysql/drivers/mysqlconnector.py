@@ -204,7 +204,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         if exit_critical_phase:
             self.exit_critical_phase(cursor.connection, cursor)
 
-        cursor.execute("CALL " + proc, args, multi=True)
+        cursor.execute("CALL " + proc, args)
         multi_results = [cursor.fetchall()]
         while cursor.nextset():
             try:
