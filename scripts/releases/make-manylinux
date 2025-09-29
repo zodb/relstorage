@@ -58,14 +58,8 @@ if [ -d /RelStorage ] && [ -d /opt/python ]; then
     rm -rf wheelhouse
     mkdir wheelhouse
     ls -l /opt/python
-    for variant in `ls -d /opt/python/cp{312,39,310,311,313}*`; do
+    for variant in `ls -d /opt/python/cp{314,312,39,310,311,313}*`; do
         echo "Building $variant"
-        if [ "$variant" = "/opt/python/cp313-cp313t" ]; then
-            # It appears that Cython 3.0.11 cannot produce code that
-            # works here. Lots of compiler errors.
-            echo "Unable to build without gil"
-            continue
-        fi
         mkdir /tmp/build
         cd /tmp/build
         git clone /RelStorage RelStorage
@@ -74,9 +68,9 @@ if [ -d /RelStorage ] && [ -d /opt/python ]; then
         $variant/bin/pip install -U setuptools
         $variant/bin/pip install -U 'cython>=3.0'
         PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
-        auditwheel show dist/RelStorage*.whl
-        auditwheel repair dist/RelStorage*.whl
-        cp wheelhouse/RelStorage*.whl /RelStorage/wheelhouse
+        auditwheel show dist/relstorage*.whl
+        auditwheel repair dist/relstorage*.whl
+        cp wheelhouse/relstorage*.whl /RelStorage/wheelhouse
         cd /RelStorage
         rm -rf /tmp/build
     done
