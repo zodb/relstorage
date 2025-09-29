@@ -160,7 +160,7 @@ class TestAbstractModuleDriver(unittest.TestCase):
 
         # Multiple
         d.REQUIREMENTS = (
-            'zope.interface > 1, != 2',
+            'zope-interface > 1, != 2',
             'ZODB'
         )
         mod = d._check_preconditions()

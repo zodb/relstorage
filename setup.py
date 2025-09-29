@@ -308,6 +308,9 @@ setup(
             # 2.8 is needed for conn.info
             # 2.9.10 will be needed for Python 3.13, but it's not out yet.
             'psycopg2 >= 2.8.3',
+            # However, at this writing, psycopg2 2.9.10, even though it can be built
+            # for 3.14rc1 cannot be imported on that version. This is a fallback.
+            'pg8000 >= 1.29.0; python_version >= "3.14" and sys_platform == "win32"',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
             # 2.8.0+ is needed for Python 3.7
@@ -357,10 +360,6 @@ setup(
             'psycopg2cffi >= 2.7.4; python_version == "3.11" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
             'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
-            # However, at this writing, psycopg2 2.9.10, even though it can be built
-            # for 3.14rc1 cannot be imported on that version. We may need to add a
-            # fallback here.
-            'pg8000 >= 1.29.0; python_version == "3.14" and sys_platform == "win32"',
         ],
     },
     entry_points={
