@@ -11,6 +11,15 @@
 
      This will be the last RelStorage release to support Python 3.9.
 
+  .. warning::
+
+     Current releases of ``persistent``, up through at least 6.1.1,
+     do not properly invalidate objects on Python 3.14. Most
+     applications probably won't notice, but there may be issues with
+     blobs, or if applications have a particular reliance on
+     ``__dict__`` being immediately cleared after an object is
+     invalidated. See `PR 221 <https://github.com/zopefoundation/persistent/pull/221>`_.
+
 - Include ``psycopg2`` in the ``postgresql`` extra on CPython 3.13+.
   See :issue:`515`.
 - Increase the minimum supported version of ``mysql-connector-python``

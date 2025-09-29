@@ -415,7 +415,13 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
 
         self.assertTrue(os.path.exists(self.cfgfile), self.cfgfile)
-        conf, _ = ZConfig.loadConfig(schema, self.cfgfile)
+        with open(self.cfgfile, 'rt', encoding='utf-8') as f:
+            # loadConfig() takes a *URL*, not a path; under the covers, it
+            # calls ``urllib.request.urlopen``. Prior to 3.14, passing
+            # a path to this function worked fine everywhere. In 3.14,
+            # they broke this on Windows, and it now complains
+            # "Can't open network file \\\\c:\...". So do it for them.
+            conf, _ = ZConfig.loadConfigFile(schema, f)
 
         return conf
 
