@@ -165,6 +165,7 @@ class ThreadWrapper(object):
             return func
 
         for name in (
+                'loadBeforeEx',
                 'loadBefore',
                 'load',
                 'store',
