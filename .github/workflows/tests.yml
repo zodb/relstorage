@@ -173,7 +173,7 @@ jobs:
           ls -l dist
           twine check dist/*
       - name: Upload RelStorage wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
           path: dist/*whl
@@ -271,7 +271,7 @@ jobs:
           DOCKER_IMAGE: quay.io/pypa/${{ matrix.image }}
         run: bash ./scripts/releases/make-manylinux
       - name: Store RelStorage wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           path: wheelhouse/*whl
           name: ${{ matrix.image }}_wheels.zip
