@@ -383,6 +383,14 @@ class CacheBlobHelper(AbstractBlobHelper):
             cursor, bytes8_to_int64(oid), bytes8_to_int64(serial), tmp_fn)
         if os.path.exists(tmp_fn):
             os.rename(tmp_fn, filename)
+            # Make the cached file read-only like files created via
+            # _move_blobs_into_place (which uses rename_or_copy_blob).
+            # This is required for test_blob_file_permissions and to
+            # prevent accidental modification of cached blobs.
+            try:
+                ZODB.blob.set_not_writable(filename)
+            except Exception:  # pylint:disable=broad-except  # pragma: no cover
+                pass
         self.cache_checker.loaded(bytecount)
 
     def storeBlob(self, cursor, store_func,
@@ -485,10 +493,35 @@ class CacheBlobHelper(AbstractBlobHelper):
 
     def finish(self, tid):
         try:
-            total_size = self._move_blobs_into_place(tid)
-            # If this slows commit down too much, we could push it to a thread
-            # in a few different ways (a queue.Queue consumer, or just spawn())
-            total_size = self._remove_old_revisions_of_stored_blobs(tid, total_size)
+            # For cached blob helpers, avoid eagerly populating the cache
+            # on store. The blob is already persisted in the database via
+            # upload_blob(); the local blob_dir is only a cache that should
+            # be populated lazily when the blob is actually accessed
+            # (loadBlob/openCommittedBlobFile). Eagerly copying each stored
+            # blob into the cache causes unnecessary I/O and disk usage,
+            # especially for bulk Copy/Paste operations that create many
+            # new objects with identical blob data (e.g., Plone).
+            #
+            # Therefore we do NOT call _move_blobs_into_place(). Instead
+            # we clean up the temporary files and report 0 bytes cached.
+            # Old revisions can still be pruned to save space even though
+            # the new revision is not cached.
+            total_size = 0
+            # Prune old revisions for history-free storages; this scans
+            # the cache and removes outdated .blob files for OIDs that
+            # were stored in this transaction. It works even when the new
+            # revision is not cached.
+            if self._txn_blobs:
+                total_size = self._remove_old_revisions_of_stored_blobs(tid, total_size)
+            # Clean up the temporary files created by _doStoreBlob.
+            # They were already uploaded to the database, so they are not
+            # needed in the cache.
+            for temp_path in list(self._txn_blobs.values()) if self._txn_blobs else ():
+                try:
+                    if os.path.exists(temp_path):
+                        ZODB.blob.remove_committed(temp_path)
+                except OSError:
+                    pass
             self.cache_checker.loaded(total_size)
         except Exception: # pylint:disable=broad-except
             # We're a cache, we can ignore issues moving things into

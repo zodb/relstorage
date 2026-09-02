@@ -151,7 +151,17 @@ class BlobHelperTest(TestCase):
         move_method = getattr(blobhelper, self.move_method)
         move_method(test_tid)
         fn2 = blobhelper.fshelper.getBlobFilename(test_oid, test_tid)
-        self.assertEqual(read_file(fn2), 'here a blob')
+        if self.shared_blob_dir:
+            # Shared blob dir is authoritative, file must be moved into place
+            self.assertEqual(read_file(fn2), 'here a blob')
+        else:
+            # Cached blob dir is a lazy cache: finish() should NOT eagerly
+            # create the cache file. The temp file should be cleaned up
+            # and the cache populated only on loadBlob.
+            self.assertFalse(os.path.exists(fn2),
+                             "cached helper should not eagerly cache on finish")
+            self.assertFalse(os.path.exists(fn1),
+                             "temp blob should be cleaned up")
 
     def test_abort(self):
         blobhelper = self._make_default()
