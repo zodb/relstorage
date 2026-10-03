@@ -288,6 +288,10 @@ setup(
             'mysqlclient >= 2.0.0',
         ],
         'mysql:platform_python_implementation=="PyPy" or (sys_platform == "win32")': [
+            # CI experiment only (do not merge): no-op comment. This branch is
+            # unmodified master; it forces a fresh AppVeyor/pr build on current
+            # floating deps to check whether testSimpleBlobRecovery fails
+            # without any fix code (suspect: PyMySQL 1.2.1+ drift).
             'PyMySQL>=0.6.6',
         ],
         # Notes on psycopg2: In 2.8, they stopped distributing full
