@@ -22,6 +22,10 @@ from zope.interface import Interface
 
 # pylint:disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=too-many-ancestors,too-many-lines
+# zope.interface declarations intentionally omit self. Newer pylint versions
+# can compare them against InterfaceBase/InterfaceClass dunders and report
+# arguments-differ.
+# pylint:disable=arguments-differ
 
 from relstorage.interfaces import Tuple
 from relstorage.interfaces import Object

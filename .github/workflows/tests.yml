@@ -84,6 +84,7 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         # 3.12.1 breaks zope.testrunner.
         # See https://github.com/zopefoundation/zope.testrunner/issues/157

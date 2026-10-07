@@ -31,6 +31,9 @@ from relstorage._compat import MAX_TID # pylint:disable=unused-import
 # pylint: disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
+# zope.interface declarations intentionally omit self. Newer pylint versions
+# can compare them against InterfaceClass dunders and report arguments-differ.
+# pylint:disable=arguments-differ
 
 class IStorageCache(IDetachableMVCCDatabaseViewer):
     """
