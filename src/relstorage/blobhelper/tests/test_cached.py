@@ -16,7 +16,13 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+import errno
 import os
+import tempfile
+
+from unittest import mock
+
+import zc.lockfile
 
 from . import test_blobhelper
 from .test_blobhelper import write_file
@@ -25,6 +31,13 @@ from .test_blobhelper import test_oid
 from .test_blobhelper import test_tid
 
 # pylint:disable=protected-access
+
+class _FlakyLock(object):
+    """A lock whose close() always fails like the Windows unlock race."""
+    def __init__(self, fp):
+        self._fp = fp
+    def close(self):
+        raise zc.lockfile.LockError("Couldn't unlock 'x.lock'")
 
 class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
     # Tests that only apply to cache dirs
@@ -65,6 +78,91 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
         blobhelper = self._make_default(download_action=None)
         blobhelper.download_blob(None, test_oid, test_tid, fn)
         self.assertFalse(os.path.exists(fn))
+
+    def test_download_blob_tolerates_lost_rename_race(self):
+        # On Windows, os.rename over a file held open by a concurrent
+        # reader raises PermissionError. The target name embeds (oid, tid),
+        # so an existing target holds identical content, just placed by the
+        # racer; the download must succeed using it and drop our temp copy.
+        blobhelper = self._make_default()
+        fn = os.path.join(self.blob_dir, '0001')
+        write_file(fn, 'winner here')
+        with mock.patch('os.rename',
+                        side_effect=PermissionError(errno.EACCES, 'denied')):
+            blobhelper.download_blob(None, test_oid, test_tid, fn)
+        self.assertEqual(read_file(fn), 'winner here')
+        self.assertFalse(os.path.exists(fn + '.tmp'))
+
+    def test_loadBlob_tolerates_lock_unlock_race(self):
+        # On Windows, closing the directory lock can intermittently raise
+        # LockError("Couldn't unlock ...") when another lock holder in the
+        # same process already released the process-wide lock region. The
+        # read must still succeed and the lock's fd must still be closed.
+        blobhelper = self._make_default()
+        fn = blobhelper.fshelper.getBlobFilename(test_oid, test_tid)
+        fp = tempfile.TemporaryFile()
+        with mock.patch('relstorage.blobhelper.cached.lock_blob',
+                        return_value=_FlakyLock(fp)):
+            res = blobhelper.loadBlob(None, test_oid, test_tid)
+        self.assertEqual(fn, res)
+        self.assertEqual(read_file(fn), 'blob here')
+        self.assertTrue(fp.closed)
+
+    def test_remove_blob_at_path_tolerates_lock_unlock_race(self):
+        # Same unlock race as above, but on the cache cleaner path: it must
+        # not kill the cleaner thread either.
+        from relstorage.blobhelper.cached import _BlobCacheSizeChecker
+        fn = os.path.join(self.blob_dir, 'victim.blob')
+        write_file(fn, '0123456789')
+        fp = tempfile.TemporaryFile()
+        with mock.patch('relstorage.blobhelper.cached.lock_blob',
+                        return_value=_FlakyLock(fp)):
+            size = _BlobCacheSizeChecker.remove_blob_at_path(fn)
+        self.assertEqual(size, 10)
+        self.assertFalse(os.path.exists(fn))
+        self.assertTrue(fp.closed)
+
+    def test_openCommittedBlobFile_retries_transient_failures(self):
+        # A transient IOError (e.g., the Windows "delete pending" race
+        # with the cache cleaner) retries the whole open; success on a
+        # later attempt returns the file.
+        blobhelper = self._make_default()
+        calls = []
+        orig_internal = blobhelper._openCommittedBlobFileInternal
+        def flaky_internal(cursor, oid, serial, blob, lock):
+            calls.append(1)
+            if len(calls) < 3:
+                raise IOError("transient")
+            return orig_internal(cursor, oid, serial, blob, lock)
+        blobhelper._openCommittedBlobFileInternal = flaky_internal
+        with blobhelper.openCommittedBlobFile(None, test_oid, test_tid) as f:
+            self.assertEqual(f.read(), b'blob here')
+        self.assertEqual(len(calls), 3)
+
+    def test_openCommittedBlobFile_gives_up_after_retries(self):
+        # ...but a persistent failure still surfaces after a bounded
+        # number of attempts instead of retrying forever.
+        blobhelper = self._make_default()
+        calls = []
+        def always_fail(cursor, oid, serial, blob, lock):
+            calls.append(1)
+            raise IOError("persistent")
+        blobhelper._openCommittedBlobFileInternal = always_fail
+        self.assertRaises(IOError, blobhelper.openCommittedBlobFile,
+                          None, test_oid, test_tid)
+        self.assertEqual(len(calls), 3)
+
+    def test_rename_downloaded_blob_raises_when_target_never_usable(self):
+        # If the rename keeps failing and no usable file appears, the
+        # error surfaces (callers with retry, like openCommittedBlobFile,
+        # may still recover).
+        blobhelper = self._make_default()
+        fn = os.path.join(self.blob_dir, '0001')
+        write_file(fn + '.tmp', 'partial')
+        with mock.patch('os.rename',
+                        side_effect=PermissionError(errno.EACCES, 'denied')):
+            self.assertRaises(PermissionError, blobhelper._rename_downloaded_blob,
+                              fn + '.tmp', fn, retries=3)
 
     def test_upload_without_tid(self):
         fn = os.path.join(self.blob_dir, '0001')
@@ -118,7 +216,10 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
         def loadBlob_wrapper(cursor, oid, serial, blob_lock):
             fn = orig_loadBlobInternal(cursor, oid, serial, blob_lock)
             if not loadBlob_calls:
-                os.remove(fn)
+                # Use remove_committed to handle read-only cache files
+                # on Windows (downloaded blobs are set_not_writable).
+                from ZODB.blob import remove_committed
+                remove_committed(fn)
                 loadBlob_calls.append(1)
             return fn
 
@@ -135,7 +236,10 @@ class CacheBlobHelperTest(test_blobhelper.BlobHelperTest):
         def loadBlob_wrapper(cursor, oid, serial, blob_lock):
             fn = orig_loadBlobInternal(cursor, oid, serial, blob_lock)
             if not loadBlob_calls:
-                os.remove(fn)
+                # Use remove_committed to handle read-only cache files
+                # on Windows (downloaded blobs are set_not_writable).
+                from ZODB.blob import remove_committed
+                remove_committed(fn)
                 loadBlob_calls.append(1)
             return fn
 

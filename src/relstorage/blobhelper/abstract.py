@@ -25,6 +25,7 @@ from relstorage._compat import iteritems
 from relstorage._compat import MAC
 
 from .util import lock_blob
+from .util import close_lock
 
 class AbstractBlobHelper(object):
     """
@@ -149,22 +150,37 @@ class AbstractBlobHelper(object):
         # platforms that we know need it.
         blob_lock = self._lock_blob_for_open(oid, serial)
         try:
-            try:
-                return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
-            except IOError:
-                # An IOError here should mean that the file couldn't
-                # be opened, probably because the cache cleaner came
-                # through and deleted it. If we had already opened a
-                # lock, then there's nothing we can do (the cache
-                # cleaner wouldn't have been able to delete it).
-                # However, we do test that we retry in that case.
-                if blob_lock is None:
-                    blob_lock = self._lock_blob_for_download(oid, serial)
-                # If we didn't have the lock, we need to try again with the lock.
-                return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
+            # The open below can transiently fail, notably on Windows:
+            # the cache cleaner may have just deleted (or marked for
+            # deletion) the file between resolving its path and opening
+            # it. Retry the whole open a bounded number of times; such
+            # states drain within milliseconds once racing readers close
+            # their handles. A genuinely missing blob raises POSKeyError
+            # (not IOError) and is never retried.
+            attempts = 0
+            while True:
+                try:
+                    return self._openCommittedBlobFileInternal(
+                        cursor, oid, serial, blob, blob_lock)
+                except IOError:
+                    attempts += 1
+                    if blob_lock is None:
+                        # First failure: take the download lock and try
+                        # again (this also covers the file simply not
+                        # being cached yet).
+                        blob_lock = self._lock_blob_for_download(oid, serial)
+                    elif attempts >= 3:
+                        raise
+                    else:
+                        # Transient failure while already holding the
+                        # lock (e.g., Windows "delete pending" race);
+                        # wait briefly for it to drain and try again.
+                        time.sleep(0.01)
         finally:
             if blob_lock is not None:
-                blob_lock.close()
+                # An intermittent unlock failure must not fail the open,
+                # and the fd still has to be released.
+                close_lock(blob_lock, (oid, serial))
 
     def temporaryDirectory(self):
         return self.fshelper.temp_dir

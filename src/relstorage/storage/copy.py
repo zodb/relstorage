@@ -173,8 +173,7 @@ class _AbstractCopier(object):
         blobfile = None
         if is_blob_record(data):
             try:
-                blobfile = self.storage.openCommittedBlobFile(
-                    oid, tid)
+                blobfile = self._open_source_blob_file(oid, tid)
             except POSKeyError: # pragma: no cover
                 logger.exception("Failed to open blob to copy")
 
@@ -209,6 +208,13 @@ class _AbstractCopier(object):
                                  '', None, active_txn_meta)
 
         return txn_data_size, blobfile is not None
+
+    def _open_source_blob_file(self, oid, tid):
+        # Open the committed blob file for *(oid, tid)* on the *source*
+        # storage. Subclasses may override this to avoid using a
+        # connection that is busy with something else (such as an active
+        # server-side record iteration cursor).
+        return self.storage.openCommittedBlobFile(oid, tid)
 
 
 class _HistoryPreservingCopier(_AbstractCopier):
@@ -356,11 +362,13 @@ class _HistoryFreeCopier(_AbstractCopier):
 
     __slots__ = (
         'trans_meta',
+        'source_blob_cursor',
     )
 
     def __init__(self, *args, **kwargs):
         _AbstractCopier.__init__(self, *args, **kwargs)
         self.trans_meta = None
+        self.source_blob_cursor = None
 
     def _compute_total_count(self):
         return len(self.storage)
@@ -368,8 +376,50 @@ class _HistoryFreeCopier(_AbstractCopier):
     def __iter__(self):
         return _RecordIternextIterator(self.storage)
 
+    def _isolated_source_blob_connection(self):
+        # Return a context manager yielding a cursor on a dedicated
+        # connection to the source storage, or None if the source
+        # doesn't support isolated connections (e.g., it isn't a
+        # RelStorage).
+        load_connection = getattr(self.storage, '_load_connection', None)
+        isolated_connection = getattr(load_connection, 'isolated_connection', None)
+        if isolated_connection is None:
+            return None
+        try:
+            return isolated_connection()
+        except NotImplementedError: # pragma: no cover - e.g., ClosedConnection
+            return None
+
+    def _open_source_blob_file(self, oid, tid):
+        cursor = self.source_blob_cursor
+        blobhelper = getattr(self.storage, 'blobhelper', None)
+        if cursor is None or blobhelper is None:
+            return super()._open_source_blob_file(oid, tid)
+        # Downloading the blob must not use the source's load
+        # connection: it is busy with our server-side record iteration
+        # cursor, and some drivers (notably PyMySQL) cannot execute a
+        # second query on the same connection, silently corrupting the
+        # iteration. Blob chunks are immutable for a given (oid, tid),
+        # so reading them on a dedicated connection stays consistent.
+        return blobhelper.openCommittedBlobFile(cursor, oid, tid)
+
     def copy(self, progress):
         # type: (_HistoryFreeProgressLogger) -> None
+        isolated = self._isolated_source_blob_connection()
+        if isolated is None:
+            self._copy_records(progress)
+        else:
+            with isolated as cursor:
+                self.source_blob_cursor = cursor
+                try:
+                    self._copy_records(progress)
+                finally:
+                    self.source_blob_cursor = None
+
+        # Perform the final commit if needed.
+        self.before_major_log()
+
+    def _copy_records(self, progress):
         for oid, tid, state in self:
             begin = perf_counter()
             if self.trans_meta is None:
@@ -393,9 +443,6 @@ class _HistoryFreeCopier(_AbstractCopier):
 
             progress.copied_one(now, now - begin, self.trans_meta, 1, record_size,
                                 was_blob)
-
-        # Perform the final commit if needed.
-        self.before_major_log()
 
     @property
     def ProgressLogger(self):

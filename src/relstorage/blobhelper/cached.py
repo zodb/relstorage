@@ -37,6 +37,7 @@ from relstorage.interfaces import POSKeyError
 from .interfaces import ICachedBlobHelper
 from .abstract import AbstractBlobHelper
 from .util import lock_blob
+from .util import close_lock
 
 
 logger = __import__('logging').getLogger(__name__)
@@ -338,7 +339,11 @@ class CacheBlobHelper(AbstractBlobHelper):
                 if blob_lock is None:
                     # If we take out the lock, we close the lock.
                     # Otherwise, it's the caller's responsibility.
-                    my_lock.close()
+                    # Unlocking can intermittently fail on Windows under
+                    # contention (the lock region is process-wide); that
+                    # must not fail the read, and the fd still has to be
+                    # released, both guaranteed by close_lock().
+                    close_lock(my_lock, blob_filename)
         return blob_filename
 
     def _loadBlobLocked(self, cursor, oid, serial, blob_filename):
@@ -382,8 +387,52 @@ class CacheBlobHelper(AbstractBlobHelper):
         bytecount = self.adapter.mover.download_blob(
             cursor, bytes8_to_int64(oid), bytes8_to_int64(serial), tmp_fn)
         if os.path.exists(tmp_fn):
-            os.rename(tmp_fn, filename)
+            self._rename_downloaded_blob(tmp_fn, filename)
         self.cache_checker.loaded(bytecount)
+
+    def _rename_downloaded_blob(self, tmp_fn, filename, retries=10):
+        """
+        Move a freshly downloaded temp blob into place.
+
+        Returns when *filename* is usable: either we renamed our download,
+        or a racing downloader already placed the identical file (the name
+        embeds oid+tid, so its content is identical); our temp copy is then
+        dropped.
+
+        If the rename keeps failing and no usable file appears — e.g., the
+        previous file is draining through Windows' transient "delete
+        pending" state — wait briefly between attempts. Raises the last
+        error if the retries are exhausted; callers that can tolerate it
+        (like ``openCommittedBlobFile``) may still recover.
+        """
+        error = None
+        for _ in range(max(retries, 1)):
+            try:
+                os.rename(tmp_fn, filename)
+            except OSError as e:
+                error = e
+                if os.path.exists(filename):
+                    logger.debug(
+                        "Lost blob download race for %s; using existing file",
+                        filename,
+                    )
+                    try:
+                        os.remove(tmp_fn)
+                    except OSError:
+                        pass
+                    return
+                time.sleep(0.01)
+            else:
+                # Make the cached file read-only like files created via
+                # _move_blobs_into_place (which uses rename_or_copy_blob).
+                # This is required for test_blob_file_permissions and to
+                # prevent accidental modification of cached blobs.
+                try:
+                    ZODB.blob.set_not_writable(filename)
+                except Exception:  # pylint:disable=broad-except  # pragma: no cover
+                    pass
+                return
+        raise error
 
     def storeBlob(self, cursor, store_func,
                   oid, serial, data, blobfilename, version, txn):
@@ -427,7 +476,9 @@ class CacheBlobHelper(AbstractBlobHelper):
         takes the total amount of data stored, and returns a modified
         value (less if we removed old revisions).
         """
-        if not total_size_stored or self.options.keep_history:
+        if self.options.keep_history:
+            return total_size_stored
+        if not self._txn_blobs:
             return total_size_stored
 
         # If we've added/edited some blobs in this transaction,
@@ -447,12 +498,22 @@ class CacheBlobHelper(AbstractBlobHelper):
             stored_oid_part, stored_tid_part, _ = stored_blob_file_path.split('.')
 
             dir_for_oid = get_dir_for_oid(stored_blob_oid)
-            all_blob_files = [fname
-                              for fname in os.listdir(dir_for_oid)
-                              if fname.endswith(blob_suffix)]
-            if len(all_blob_files) < 2:
-                # Nothing to do if there's only one file.
+            try:
+                names = os.listdir(dir_for_oid)
+            except FileNotFoundError:
+                # No cached revisions for this OID (lazy cache may never
+                # have downloaded it). Nothing to prune.
                 continue
+            all_blob_files = [fname
+                              for fname in names
+                              if fname.endswith(blob_suffix)]
+            if not all_blob_files:
+                continue
+            # Note: with a lazy cache the new revision may not be cached
+            # yet (finish() does not move blobs into place), so there may
+            # be only one file and it may be an old revision that must be
+            # pruned. Do not skip when len < 2; the tid comparison below
+            # handles both cases.
 
             for filename in all_blob_files:
                 # TODO: We could save some calls to listdir() if we collected
@@ -485,10 +546,41 @@ class CacheBlobHelper(AbstractBlobHelper):
 
     def finish(self, tid):
         try:
-            total_size = self._move_blobs_into_place(tid)
-            # If this slows commit down too much, we could push it to a thread
-            # in a few different ways (a queue.Queue consumer, or just spawn())
-            total_size = self._remove_old_revisions_of_stored_blobs(tid, total_size)
+            # For cached blob helpers, avoid eagerly populating the cache
+            # on store. The blob is already persisted in the database via
+            # upload_blob(); the local blob_dir is only a cache that should
+            # be populated lazily when the blob is actually accessed
+            # (loadBlob/openCommittedBlobFile). Eagerly copying each stored
+            # blob into the cache causes unnecessary I/O and disk usage,
+            # especially for bulk Copy/Paste operations that create many
+            # new objects with identical blob data (e.g., Plone).
+            #
+            # Therefore we do NOT call _move_blobs_into_place(). Instead
+            # we clean up the temporary files and report 0 bytes cached.
+            # Old revisions can still be pruned to save space even though
+            # the new revision is not cached.
+            total_size = 0
+            # Snapshot temp paths first: _remove_old_revisions and cleanup
+            # must run even if one of them fails.
+            temp_paths = list(self._txn_blobs.values()) if self._txn_blobs else ()
+            # Prune old revisions for history-free storages; this scans
+            # the cache and removes outdated .blob files for OIDs that
+            # were stored in this transaction. It works even when the new
+            # revision is not cached.
+            if self._txn_blobs:
+                try:
+                    total_size = self._remove_old_revisions_of_stored_blobs(tid, total_size)
+                except Exception:  # pylint:disable=broad-except
+                    logger.exception("Failed to prune old blob cache revisions.")
+            # Clean up the temporary files created by _doStoreBlob.
+            # They were already uploaded to the database, so they are not
+            # needed in the cache.
+            for temp_path in temp_paths:
+                try:
+                    if os.path.exists(temp_path):
+                        ZODB.blob.remove_committed(temp_path)
+                except OSError:
+                    pass
             self.cache_checker.loaded(total_size)
         except Exception: # pylint:disable=broad-except
             # We're a cache, we can ignore issues moving things into
@@ -673,7 +765,10 @@ class _BlobCacheSizeChecker(timer):
 
             return fsize
         finally:
-            lock.close()
+            # Like the download path, an intermittent unlock failure
+            # must not kill the cleaner thread; close_lock() still
+            # releases the file object.
+            close_lock(lock, file_path)
 
     def __shrink_blob_dir(self, current_size, files_by_atime):
         size = current_size
