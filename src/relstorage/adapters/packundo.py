@@ -1358,11 +1358,13 @@ class HistoryFreePackUndo(PackUndo):
         # oids should be a slice of an ``OidList``, which may be an
         # ``array.array``; those are relatively slow to iterate.
 
-        # The batcher always does deletes before inserts, which is
-        # exactly what we want.
-        # In the past, we performed all deletes and then all inserts;
-        # now, things to batching, they could be interleaved, but
-        # because we process OID-by-OID, that should be fine.
+        # The batcher does deletes before inserts *within a flush*, but a
+        # flush can happen as soon as any row is queued. So for each OID we
+        # queue its deletes before its inserts: an insert queued first can
+        # fill the batch and reach the database while the OID's old
+        # ``object_refs_added`` row is still there (a duplicate key; see
+        # :issue:`482`). That row exists for every object changed since the
+        # last pack, because the table is kept between packs.
         # In the past, we also DELETED from object_refs_added and object_ref
         # everything found in the ``oids`` parameter; now we only do a delete if
         # we get back a row from object_state; again, that shouldn't matter, rows
@@ -1385,13 +1387,6 @@ class HistoryFreePackUndo(PackUndo):
             state = self.driver.binary_column_as_state_type(state)
             row = (from_oid, tid)
 
-            store_batcher.insert_into(
-                'object_refs_added (zoid, tid)',
-                object_refs_added_schema,
-                row,
-                row,
-                size=2
-            )
             store_batcher.delete_from(
                 'object_refs_added',
                 zoid=from_oid
@@ -1399,6 +1394,13 @@ class HistoryFreePackUndo(PackUndo):
             store_batcher.delete_from(
                 'object_ref',
                 zoid=from_oid
+            )
+            store_batcher.insert_into(
+                'object_refs_added (zoid, tid)',
+                object_refs_added_schema,
+                row,
+                row,
+                size=2
             )
 
             if state:

@@ -5,7 +5,14 @@
 4.3.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- History-free ``pre_pack``: queue an object's deletes from
+  ``object_refs_added`` and ``object_ref`` before its new
+  ``object_refs_added`` row. The batcher runs deletes before inserts
+  only within one flush, and inserting that row can trigger a flush,
+  so the insert could reach the database while the object's old row
+  was still there, failing with ``duplicate key value violates unique
+  constraint "object_refs_added_pkey"``. Any object changed since the
+  previous pack can hit this. See :issue:`482`.
 
 
 4.3.0 (2026-05-20)
